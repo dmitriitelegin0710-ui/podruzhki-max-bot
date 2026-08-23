@@ -28,7 +28,7 @@ import pytz
 # "Значения, разделённые запятыми (.csv)" вместо "Веб-страница" -> Опубликовать
 # -> скопировать ссылку. Она должна заканчиваться на pub?output=csv,
 # а НЕ на pubhtml (pubhtml — это веб-страница, скрипт её прочитать не сможет).
-SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR-oJrZwXiwymusIpr6cRZ5GPNDiNWaFDeOvsFMuqe0herSVMpkEZcN2vYzBOibznyj3sG7IcINKYBq/pub?output=csv"
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR-oJrZwXiwymusIpr6cRZ5GPNDiNWaFDeOvsFMuqe0herSVMpkEZcN2vYzBOibznyj3sG7IcINKYBq/pub?gid=1384020627&single=true&output=csv"
 
 # Токен бота и ID канала берутся из переменных окружения (GitHub Secrets),
 # в самом файле их быть не должно — иначе токен утечёт вместе с кодом.
