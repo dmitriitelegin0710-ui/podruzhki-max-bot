@@ -21,7 +21,7 @@ import pytz
 # Ссылка на CSV-экспорт вашей Google Таблицы.
 # Как получить: Файл -> Опубликовать в интернете -> выбрать лист "Постинг" ->
 # формат "Значения, разделённые запятыми (.csv)" -> Опубликовать -> скопировать ссылку.
-SHEET_CSV_URL = "СЮДА_ВСТАВИТЬ_ССЫЛКУ_НА_CSV"
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR-oJrZwXiwymusIpr6cRZ5GPNDiNWaFDeOvsFMuqe0herSVMpkEZcN2vYzBOibznyj3sG7IcINKYBq/pubhtml"
 
 # Токен бота и ID канала берутся из переменных окружения (GitHub Secrets),
 # в самом файле их быть не должно — иначе токен утечёт вместе с кодом.
