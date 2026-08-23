@@ -31,6 +31,7 @@ jobs:
         env:
           MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
           MAX_CHAT_ID: ${{ secrets.MAX_CHAT_ID }}
+          REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       - name: Сохранить список опубликованных постов
         run: |
           git config user.name "github-actions[bot]"
