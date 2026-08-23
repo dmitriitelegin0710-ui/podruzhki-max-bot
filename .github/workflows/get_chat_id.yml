@@ -1,0 +1,26 @@
+# Этот файл нужно положить в репозиторий по пути:
+#   .github/workflows/get_chat_id.yml
+#
+# Это РАЗОВЫЙ вспомогательный workflow, не расписание — запускается только
+# вручную кнопкой, когда нужно узнать chat_id канала. После того как узнаете
+# id — этот файл можно оставить (не мешает) или удалить, как захотите.
+
+name: Get MAX chat_id (разово)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Установить российский сертификат Минцифры
+        run: |
+          sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_root_ca.crt https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt
+          sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt
+          sudo update-ca-certificates
+
+      - name: Запросить последние события бота
+        run: |
+          curl -s -H "Authorization: Bearer ${{ secrets.MAX_BOT_TOKEN }}" \
+            "https://platform-api2.max.ru/updates" | python3 -m json.tool
