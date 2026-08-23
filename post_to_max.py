@@ -5,6 +5,14 @@
 - ссылки на CSV-экспорт таблицы (переменная SHEET_CSV_URL ниже),
 - токена бота и chat_id канала — их нужно положить в GitHub Secrets
   (Settings -> Secrets and variables -> Actions), НЕ вписывать в этот файл.
+
+Добавлена поддержка картинок:
+  Тип медиа — нет / картинка
+  Ключевое слово для фото — на английском, по нему Pexels ищет картинку
+                              (используется, только если "Ссылка на медиа" пустая)
+  Ссылка на медиа — прямая ссылка на картинку (необязательна, если есть ключевое слово)
+
+Видео пока не поддерживается — это осознанно, добавим позже при необходимости.
 """
 import csv
 import json
@@ -26,6 +34,7 @@ SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR-oJrZwXiwymus
 # в самом файле их быть не должно — иначе токен утечёт вместе с кодом.
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
 CHAT_ID = os.environ["MAX_CHAT_ID"]
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")  # необязательный: нет ключа — просто не будет автоподбора
 
 STATE_FILE = "posted.json"  # тут храним номера уже опубликованных постов
 TIMEZONE = "Europe/Moscow"
@@ -44,12 +53,59 @@ def save_posted(posted: set) -> None:
         json.dump(sorted(posted, key=int), f, ensure_ascii=False)
 
 
-def send_message(text: str) -> requests.Response:
+def fetch_pexels_image(keyword: str):
+    """Ищет картинку на Pexels по ключевому слову, возвращает прямую ссылку или None."""
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return None
+    if not PEXELS_API_KEY:
+        print("PEXELS_API_KEY не задан — автоподбор картинки пропущен")
+        return None
+    try:
+        resp = requests.get(
+            "https://api.pexels.com/v1/search",
+            params={"query": keyword, "per_page": 1, "orientation": "portrait"},
+            headers={"Authorization": PEXELS_API_KEY},  # у Pexels ключ без слова Bearer
+            timeout=20,
+        )
+        resp.raise_for_status()
+        photos = resp.json().get("photos") or []
+        if not photos:
+            print(f"Pexels: по запросу '{keyword}' ничего не нашлось")
+            return None
+        return photos[0]["src"]["large"]
+    except Exception as e:
+        print(f"Pexels: ошибка запроса ({keyword}) — {e}")
+        return None
+
+
+def build_attachments(media_type: str, media_url: str, photo_keyword: str):
+    """Собирает вложение для поста. Пока поддерживаются только картинки."""
+    media_type = (media_type or "").strip().lower()
+    media_url = (media_url or "").strip()
+
+    if not media_type or media_type == "нет":
+        return None
+
+    if media_type == "картинка":
+        url = media_url or fetch_pexels_image(photo_keyword)
+        if not url:
+            print("Картинка не найдена (ни ссылки, ни через Pexels) — публикую без вложения")
+            return None
+        return [{"type": "image", "payload": {"url": url}}]
+
+    print(f"Тип медиа '{media_type}' пока не поддерживается (видео отключено) — публикую без вложения")
+    return None
+
+
+def send_message(text: str, attachments=None) -> requests.Response:
     url = f"https://platform-api2.max.ru/messages?chat_id={CHAT_ID}"
     # ВАЖНО: MAX не использует слово "Bearer" перед токеном, в отличие от многих
     # других API. Заголовок должен быть ровно таким:
     headers = {"Authorization": BOT_TOKEN}
     payload = {"text": text}
+    if attachments:
+        payload["attachments"] = attachments
     return requests.post(url, headers=headers, json=payload, timeout=30)
 
 
@@ -104,14 +160,24 @@ def main() -> None:
             print(f"Пост №{num}: пусто в колонке 'Текст поста', пропускаю")
             continue
 
-        response = send_message(text)
+        try:
+            attachments = build_attachments(
+                row.get("Тип медиа"),
+                row.get("Ссылка на медиа"),
+                row.get("Ключевое слово для фото"),
+            )
+        except Exception as e:
+            print(f"Пост №{num}: ОШИБКА при подготовке картинки — {e}. Отправляю без вложения.")
+            attachments = None
+
+        response = send_message(text, attachments)
         print(f"Пост №{num}: статус {response.status_code}, ответ: {response.text[:200]}")
 
         if response.status_code == 200:
             posted.add(num)
             changed = True
         else:
-            print(f"Пост №{num}: НЕ опубликован, проверьте токен/chat_id/права бота")
+            print(f"Пост №{num}: НЕ опубликован, проверьте токен/chat_id/права бота/ссылку на медиа")
 
     if changed:
         save_posted(posted)
