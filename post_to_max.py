@@ -1,18 +1,14 @@
 """
 Скрипт публикации постов из Google Таблицы в канал MAX.
 Запускается по расписанию через GitHub Actions (см. .github/workflows/post.yml).
-Ничего не требует, кроме:
-- ссылки на CSV-экспорт таблицы (переменная SHEET_CSV_URL ниже),
-- токена бота и chat_id канала — их нужно положить в GitHub Secrets
-  (Settings -> Secrets and variables -> Actions), НЕ вписывать в этот файл.
 
-Добавлена поддержка картинок:
-  Тип медиа — нет / картинка
-  Ключевое слово для фото — на английском, по нему Pexels ищет картинку
-                              (используется, только если "Ссылка на медиа" пустая)
-  Ссылка на медиа — прямая ссылка на картинку (необязательна, если есть ключевое слово)
+Картинки и видео отправляются через официальный двухшаговый механизм MAX:
+  1. POST /uploads?type=... — получаем адрес для загрузки (и иногда сразу токен)
+  2. Заливаем сами байты файла по этому адресу
+  3. В сообщении используем полученный токен вложения
 
-Видео пока не поддерживается — это осознанно, добавим позже при необходимости.
+Прямая ссылка на картинку в самом сообщении MAX не поддерживает, несмотря на то,
+что это встречается в некоторых неофициальных источниках — проверено на практике.
 """
 import csv
 import json
@@ -31,6 +27,7 @@ PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 STATE_FILE = "posted.json"
 TIMEZONE = "Europe/Moscow"
 STATUS_READY = "Черновик"
+API_BASE = "https://platform-api2.max.ru"
 
 
 def load_posted() -> set:
@@ -47,10 +44,9 @@ def save_posted(posted: set) -> None:
 
 def fetch_pexels_image(keyword: str):
     keyword = (keyword or "").strip()
-    if not keyword:
-        return None
-    if not PEXELS_API_KEY:
-        print("PEXELS_API_KEY не задан — автоподбор картинки пропущен")
+    if not keyword or not PEXELS_API_KEY:
+        if keyword and not PEXELS_API_KEY:
+            print("PEXELS_API_KEY не задан — автоподбор картинки пропущен")
         return None
     try:
         resp = requests.get(
@@ -70,6 +66,39 @@ def fetch_pexels_image(keyword: str):
         return None
 
 
+def upload_media_and_get_token(media_url: str, media_type: str):
+    """Скачивает файл по ссылке и заливает его в MAX, возвращает токен вложения."""
+    meta_resp = requests.post(
+        f"{API_BASE}/uploads",
+        params={"type": media_type},
+        headers={"Authorization": BOT_TOKEN},
+        timeout=30,
+    )
+    meta_resp.raise_for_status()
+    meta = meta_resp.json()
+    upload_url = meta["url"]
+    token = meta.get("token")  # для видео токен обычно приходит уже здесь
+
+    media_bytes = requests.get(media_url, timeout=60).content
+    filename = "image.jpg" if media_type == "image" else "video.mp4"
+    files = {"data": (filename, media_bytes)}
+    upload_resp = requests.post(upload_url, files=files, timeout=120)
+    upload_resp.raise_for_status()
+
+    if not token:
+        try:
+            body = upload_resp.json()
+            token = body.get("token")
+            if not token and "photos" in body:
+                # иногда токен для картинок приходит вложенным по id фото
+                first_photo = next(iter(body["photos"].values()))
+                token = first_photo.get("token")
+        except Exception:
+            pass
+
+    return token
+
+
 def build_attachments(media_type: str, media_url: str, photo_keyword: str):
     media_type = (media_type or "").strip().lower()
     media_url = (media_url or "").strip()
@@ -82,14 +111,28 @@ def build_attachments(media_type: str, media_url: str, photo_keyword: str):
         if not url:
             print("Картинка не найдена (ни ссылки, ни через Pexels) — публикую без вложения")
             return None
-        return [{"type": "image", "payload": {"url": url}}]
+        token = upload_media_and_get_token(url, "image")
+        if not token:
+            print("Не удалось получить токен изображения после загрузки — публикую без вложения")
+            return None
+        return [{"type": "image", "payload": {"token": token}}]
 
-    print(f"Тип медиа '{media_type}' пока не поддерживается (видео отключено) — публикую без вложения")
+    if media_type == "видео":
+        if not media_url:
+            print("Для видео нужна прямая ссылка в 'Ссылка на медиа' — публикую без вложения")
+            return None
+        token = upload_media_and_get_token(media_url, "video")
+        if not token:
+            print("Не удалось получить токен видео после загрузки — публикую без вложения")
+            return None
+        return [{"type": "video", "payload": {"token": token}}]
+
+    print(f"Неизвестный тип медиа '{media_type}' — публикую без вложения")
     return None
 
 
 def send_message(text: str, attachments=None) -> requests.Response:
-    url = f"https://platform-api2.max.ru/messages?chat_id={CHAT_ID}"
+    url = f"{API_BASE}/messages?chat_id={CHAT_ID}"
     headers = {"Authorization": BOT_TOKEN}
     payload = {"text": text}
     if attachments:
@@ -157,7 +200,7 @@ def main() -> None:
                 row.get("Ключевое слово для фото"),
             )
         except Exception as e:
-            print(f"Пост №{num}: ОШИБКА при подготовке картинки — {e}. Отправляю без вложения.")
+            print(f"Пост №{num}: ОШИБКА при подготовке медиа — {e}. Отправляю без вложения.")
             attachments = None
 
         response = send_message(text, attachments)
