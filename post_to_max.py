@@ -2,15 +2,17 @@
 Скрипт публикации постов из Google Таблицы в канал MAX.
 Запускается по расписанию через GitHub Actions (см. .github/workflows/post.yml).
 
-Картинки и видео отправляются через официальный двухшаговый механизм MAX:
-  1. POST /uploads?type=... — получаем адрес для загрузки (и иногда сразу токен)
-  2. Заливаем сами байты файла по этому адресу
-  3. В сообщении используем полученный токен вложения
-
-Прямая ссылка на картинку в самом сообщении MAX не поддерживает, несмотря на то,
-что это встречается в некоторых неофициальных источниках — проверено на практике.
+Столбцы, которые понимает скрипт:
+  №, Дата, Время, Текст поста, Статус — обязательные
+  Тип медиа            — нет / картинка / видео
+  Ключевое слово для фото — на английском, для автоподбора через Pexels
+                            (используется, только если "Ссылка на медиа" пустая)
+  Ссылка на медиа       — прямая ссылка на картинку или видео (необязательна для картинки)
+  Ссылка на сайт        — если заполнена, под постом появится кнопка со ссылкой
+  Текст кнопки          — необязательно; если пусто, кнопка называется "Читать на сайте"
 """
 import csv
+import io
 import json
 import os
 from datetime import datetime
@@ -28,6 +30,7 @@ STATE_FILE = "posted.json"
 TIMEZONE = "Europe/Moscow"
 STATUS_READY = "Черновик"
 API_BASE = "https://platform-api2.max.ru"
+DEFAULT_BUTTON_TEXT = "Читать на сайте"
 
 
 def load_posted() -> set:
@@ -67,7 +70,6 @@ def fetch_pexels_image(keyword: str):
 
 
 def upload_media_and_get_token(media_url: str, media_type: str):
-    """Скачивает файл по ссылке и заливает его в MAX, возвращает токен вложения."""
     meta_resp = requests.post(
         f"{API_BASE}/uploads",
         params={"type": media_type},
@@ -77,7 +79,7 @@ def upload_media_and_get_token(media_url: str, media_type: str):
     meta_resp.raise_for_status()
     meta = meta_resp.json()
     upload_url = meta["url"]
-    token = meta.get("token")  # для видео токен обычно приходит уже здесь
+    token = meta.get("token")
 
     media_bytes = requests.get(media_url, timeout=60).content
     filename = "image.jpg" if media_type == "image" else "video.mp4"
@@ -90,16 +92,14 @@ def upload_media_and_get_token(media_url: str, media_type: str):
             body = upload_resp.json()
             token = body.get("token")
             if not token and "photos" in body:
-                # иногда токен для картинок приходит вложенным по id фото
                 first_photo = next(iter(body["photos"].values()))
                 token = first_photo.get("token")
         except Exception:
             pass
-
     return token
 
 
-def build_attachments(media_type: str, media_url: str, photo_keyword: str):
+def build_media_attachment(media_type: str, media_url: str, photo_keyword: str):
     media_type = (media_type or "").strip().lower()
     media_url = (media_url or "").strip()
 
@@ -109,26 +109,37 @@ def build_attachments(media_type: str, media_url: str, photo_keyword: str):
     if media_type == "картинка":
         url = media_url or fetch_pexels_image(photo_keyword)
         if not url:
-            print("Картинка не найдена (ни ссылки, ни через Pexels) — публикую без вложения")
+            print("Картинка не найдена (ни ссылки, ни через Pexels) — без вложения")
             return None
         token = upload_media_and_get_token(url, "image")
         if not token:
-            print("Не удалось получить токен изображения после загрузки — публикую без вложения")
+            print("Не удалось получить токен изображения — без вложения")
             return None
-        return [{"type": "image", "payload": {"token": token}}]
+        return {"type": "image", "payload": {"token": token}}
 
     if media_type == "видео":
         if not media_url:
-            print("Для видео нужна прямая ссылка в 'Ссылка на медиа' — публикую без вложения")
+            print("Для видео нужна прямая ссылка в 'Ссылка на медиа' — без вложения")
             return None
         token = upload_media_and_get_token(media_url, "video")
         if not token:
-            print("Не удалось получить токен видео после загрузки — публикую без вложения")
+            print("Не удалось получить токен видео — без вложения")
             return None
-        return [{"type": "video", "payload": {"token": token}}]
+        return {"type": "video", "payload": {"token": token}}
 
-    print(f"Неизвестный тип медиа '{media_type}' — публикую без вложения")
+    print(f"Неизвестный тип медиа '{media_type}' — без вложения")
     return None
+
+
+def build_link_button_attachment(site_url: str, button_text: str):
+    site_url = (site_url or "").strip()
+    if not site_url:
+        return None
+    text = (button_text or "").strip() or DEFAULT_BUTTON_TEXT
+    return {
+        "type": "inline_keyboard",
+        "payload": {"buttons": [[{"type": "link", "text": text, "url": site_url}]]},
+    }
 
 
 def send_message(text: str, attachments=None) -> requests.Response:
@@ -166,7 +177,9 @@ def main() -> None:
 
     resp = requests.get(SHEET_CSV_URL, timeout=30)
     resp.encoding = "utf-8"
-    reader = csv.DictReader(resp.text.splitlines())
+    # ВАЖНО: используем io.StringIO(resp.text), а НЕ resp.text.splitlines() —
+    # splitlines() ломает многострочные посты (разрезает абзацы по границам ячеек CSV).
+    reader = csv.DictReader(io.StringIO(resp.text))
 
     posted = load_posted()
     print(f"Уже отмечено как опубликованные (из posted.json): {sorted(posted, key=int) if posted else 'пусто'}")
@@ -193,24 +206,28 @@ def main() -> None:
             print(f"Пост №{num}: пусто в колонке 'Текст поста', пропускаю")
             continue
 
+        attachments = []
         try:
-            attachments = build_attachments(
-                row.get("Тип медиа"),
-                row.get("Ссылка на медиа"),
-                row.get("Ключевое слово для фото"),
+            media = build_media_attachment(
+                row.get("Тип медиа"), row.get("Ссылка на медиа"), row.get("Ключевое слово для фото")
             )
+            if media:
+                attachments.append(media)
         except Exception as e:
-            print(f"Пост №{num}: ОШИБКА при подготовке медиа — {e}. Отправляю без вложения.")
-            attachments = None
+            print(f"Пост №{num}: ОШИБКА при подготовке медиа — {e}. Публикую без него.")
 
-        response = send_message(text, attachments)
+        button = build_link_button_attachment(row.get("Ссылка на сайт"), row.get("Текст кнопки"))
+        if button:
+            attachments.append(button)
+
+        response = send_message(text, attachments or None)
         print(f"Пост №{num}: статус {response.status_code}, ответ: {response.text[:200]}")
 
         if response.status_code == 200:
             posted.add(num)
             changed = True
         else:
-            print(f"Пост №{num}: НЕ опубликован, проверьте токен/chat_id/права бота/ссылку на медиа")
+            print(f"Пост №{num}: НЕ опубликован, проверьте токен/chat_id/права бота/ссылки")
 
     print(f"Проверено строк: {checked}, из них ещё не наступило время: {skipped_future}")
 
