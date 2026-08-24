@@ -22,23 +22,15 @@ import requests
 import pytz
 
 # ---- НАСТРОЙКИ ----
-# Ссылка на CSV-экспорт вашей Google Таблицы.
-# Как получить: Файл -> Опубликовать в интернете -> выбрать лист "Постинг" ->
-# в выпадающем списке ФОРМАТА (не там, где выбираете лист) явно указать
-# "Значения, разделённые запятыми (.csv)" вместо "Веб-страница" -> Опубликовать
-# -> скопировать ссылку. Она должна заканчиваться на pub?output=csv,
-# а НЕ на pubhtml (pubhtml — это веб-страница, скрипт её прочитать не сможет).
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR-oJrZwXiwymusIpr6cRZ5GPNDiNWaFDeOvsFMuqe0herSVMpkEZcN2vYzBOibznyj3sG7IcINKYBq/pub?gid=1384020627&single=true&output=csv"
 
-# Токен бота и ID канала берутся из переменных окружения (GitHub Secrets),
-# в самом файле их быть не должно — иначе токен утечёт вместе с кодом.
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
 CHAT_ID = os.environ["MAX_CHAT_ID"]
-PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")  # необязательный: нет ключа — просто не будет автоподбора
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 
-STATE_FILE = "posted.json"  # тут храним номера уже опубликованных постов
+STATE_FILE = "posted.json"
 TIMEZONE = "Europe/Moscow"
-STATUS_READY = "Черновик"  # ВАЖНО: должно точь-в-точь совпадать со значением в столбце "Статус" вашей таблицы
+STATUS_READY = "Черновик"
 
 
 def load_posted() -> set:
@@ -54,7 +46,6 @@ def save_posted(posted: set) -> None:
 
 
 def fetch_pexels_image(keyword: str):
-    """Ищет картинку на Pexels по ключевому слову, возвращает прямую ссылку или None."""
     keyword = (keyword or "").strip()
     if not keyword:
         return None
@@ -65,7 +56,7 @@ def fetch_pexels_image(keyword: str):
         resp = requests.get(
             "https://api.pexels.com/v1/search",
             params={"query": keyword, "per_page": 1, "orientation": "portrait"},
-            headers={"Authorization": PEXELS_API_KEY},  # у Pexels ключ без слова Bearer
+            headers={"Authorization": PEXELS_API_KEY},
             timeout=20,
         )
         resp.raise_for_status()
@@ -80,7 +71,6 @@ def fetch_pexels_image(keyword: str):
 
 
 def build_attachments(media_type: str, media_url: str, photo_keyword: str):
-    """Собирает вложение для поста. Пока поддерживаются только картинки."""
     media_type = (media_type or "").strip().lower()
     media_url = (media_url or "").strip()
 
@@ -100,8 +90,6 @@ def build_attachments(media_type: str, media_url: str, photo_keyword: str):
 
 def send_message(text: str, attachments=None) -> requests.Response:
     url = f"https://platform-api2.max.ru/messages?chat_id={CHAT_ID}"
-    # ВАЖНО: MAX не использует слово "Bearer" перед токеном, в отличие от многих
-    # других API. Заголовок должен быть ровно таким:
     headers = {"Authorization": BOT_TOKEN}
     payload = {"text": text}
     if attachments:
@@ -110,7 +98,6 @@ def send_message(text: str, attachments=None) -> requests.Response:
 
 
 def parse_scheduled(date_str: str, time_str: str, tz):
-    """Собирает Дату+Время из таблицы в один объект datetime с часовым поясом."""
     date_str = (date_str or "").strip()
     time_str = (time_str or "").strip()
     if not date_str:
@@ -132,15 +119,20 @@ def parse_scheduled(date_str: str, time_str: str, tz):
 def main() -> None:
     tz = pytz.timezone(TIMEZONE)
     now = datetime.now(tz)
+    print(f"Текущее время по Москве на момент запуска: {now.strftime('%d.%m.%Y %H:%M')}")
 
     resp = requests.get(SHEET_CSV_URL, timeout=30)
     resp.encoding = "utf-8"
     reader = csv.DictReader(resp.text.splitlines())
 
     posted = load_posted()
+    print(f"Уже отмечено как опубликованные (из posted.json): {sorted(posted, key=int) if posted else 'пусто'}")
     changed = False
+    checked = 0
+    skipped_future = 0
 
     for row in reader:
+        checked += 1
         num = (row.get("№") or "").strip()
         if not num or num in posted:
             continue
@@ -149,10 +141,8 @@ def main() -> None:
             continue
 
         scheduled = parse_scheduled(row.get("Дата"), row.get("Время"), tz)
-        # Публикуем, если время уже наступило (а не только точно "сейчас") —
-        # так пропуск одного запуска (например, из-за задержки GitHub Actions)
-        # не потеряет пост навсегда, его отправит следующий же запуск.
         if not scheduled or scheduled > now:
+            skipped_future += 1
             continue
 
         text = (row.get("Текст поста") or "").strip()
@@ -178,6 +168,8 @@ def main() -> None:
             changed = True
         else:
             print(f"Пост №{num}: НЕ опубликован, проверьте токен/chat_id/права бота/ссылку на медиа")
+
+    print(f"Проверено строк: {checked}, из них ещё не наступило время: {skipped_future}")
 
     if changed:
         save_posted(posted)
