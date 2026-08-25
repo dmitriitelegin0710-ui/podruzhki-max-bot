@@ -91,7 +91,7 @@ def generate_text(rubric: dict, weekday_name: str) -> str:
         f"Тема поста: {rubric['topic_hint']}"
     )
     body = {
-        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt/latest",
+        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite/latest",
         "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 800},
         "messages": [{"role": "user", "text": prompt}],
     }
