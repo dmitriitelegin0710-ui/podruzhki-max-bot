@@ -15,6 +15,7 @@
 import json
 import os
 import random
+import re
 from datetime import datetime
 
 import requests
@@ -48,6 +49,9 @@ POST_STRUCTURE_INSTRUCTIONS = """
 
 Общий объём — 150-250 слов. Не используй хэштеги. Не придумывай цитаты реальных людей.
 Не добавляй никаких ссылок в текст — ссылка (если нужна) добавляется отдельно кнопкой.
+НЕ используй Markdown-разметку вообще: никаких звёздочек (**жирный**), решёток (### заголовок),
+подчёркиваний или обратных кавычек. Пиши обычным простым текстом, выделяй важное просто
+формулировкой, а не символами разметки.
 """
 
 
@@ -66,6 +70,17 @@ def load_state() -> set:
 def save_state(state: set) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(sorted(state), f, ensure_ascii=False)
+
+
+def strip_markdown(text: str) -> str:
+    """Подстраховка на случай, если YandexGPT всё же добавит Markdown-разметку,
+    несмотря на прямой запрет в промпте — убираем символы, оставляя сам текст."""
+    text = re.sub(r'#{1,6}\s*', '', text)          # ### заголовки
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)     # **жирный**
+    text = re.sub(r'\*(.+?)\*', r'\1', text)         # *курсив*
+    text = re.sub(r'_(.+?)_', r'\1', text)           # _курсив_
+    text = re.sub(r'`(.+?)`', r'\1', text)           # `код`
+    return text.strip()
 
 
 def generate_text(rubric: dict, weekday_name: str) -> str:
@@ -87,7 +102,8 @@ def generate_text(rubric: dict, weekday_name: str) -> str:
     resp = requests.post(YANDEXGPT_URL, headers=headers, json=body, timeout=60)
     resp.raise_for_status()
     data = resp.json()
-    return data["result"]["alternatives"][0]["message"]["text"].strip()
+    raw_text = data["result"]["alternatives"][0]["message"]["text"].strip()
+    return strip_markdown(raw_text)
 
 
 def fetch_pexels_image(keywords: list):
