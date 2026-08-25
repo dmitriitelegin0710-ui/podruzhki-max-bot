@@ -1,0 +1,148 @@
+{
+  "rubrics": [
+    {
+      "key": "utro_privet",
+      "time": "06:30",
+      "emoji": "☀️",
+      "title": "Доброе утро",
+      "topic_hint": "Тёплое утреннее приветствие для женской аудитории, с учётом текущего дня недели (упомяни, какой сегодня день, в позитивном ключе). Настрой на хороший день.",
+      "site_link": null,
+      "photo_keywords_by_weekday": {
+        "0": ["monday morning coffee woman cozy"],
+        "1": ["tuesday morning breakfast sunny"],
+        "2": ["wednesday morning tea window"],
+        "3": ["thursday morning smile woman"],
+        "4": ["friday morning coffee celebration"],
+        "5": ["saturday morning relax breakfast"],
+        "6": ["sunday morning cozy blanket coffee"]
+      }
+    },
+    {
+      "key": "goroskop",
+      "time": "07:00",
+      "emoji": "🔮",
+      "title": "Гороскоп дня",
+      "topic_hint": "Короткая интригующая выжимка про гороскоп на сегодня в целом (без конкретики по знакам, т.к. это не проверить), приглашение узнать свой персональный прогноз на сайте.",
+      "site_link": "https://xn--d1aeghrfjy.online/#horoscope-widget",
+      "photo_keywords_by_weekday": null,
+      "photo_keywords": ["zodiac astrology mystic woman"]
+    },
+    {
+      "key": "layfhak",
+      "time": "07:30",
+      "emoji": "🏠",
+      "title": "Лайфхак для дома",
+      "topic_hint": "Один практичный бытовой лайфхак (уборка, хранение, организация пространства) с пошаговым объяснением, почему это работает.",
+      "site_link": null,
+      "photo_keywords": ["cozy home organization tips"]
+    },
+    {
+      "key": "zozh",
+      "time": "08:00",
+      "emoji": "💪",
+      "title": "ЗОЖ и здоровье",
+      "topic_hint": "Разбор одной полезной привычки или мифа о здоровье/питании, с объяснением почему это работает или не работает.",
+      "site_link": null,
+      "photo_keywords": ["healthy lifestyle woman morning"]
+    },
+    {
+      "key": "recept",
+      "time": "08:30",
+      "emoji": "🍳",
+      "title": "Рецепт дня",
+      "topic_hint": "Один несложный кулинарный рецепт (завтрак/лёгкое блюдо) с точными пропорциями ингредиентов и пошаговыми инструкциями.",
+      "site_link": null,
+      "photo_keywords": ["healthy breakfast food photography"]
+    },
+    {
+      "key": "psy_otnosheniya",
+      "time": "09:00",
+      "emoji": "💬",
+      "title": "Психология отношений",
+      "topic_hint": "Разбор одного распространённого паттерна или ситуации в отношениях (пара, семья, дружба), с практическим советом.",
+      "site_link": null,
+      "photo_keywords": ["woman thinking relationship emotional"]
+    },
+    {
+      "key": "ezoterika",
+      "time": "12:00",
+      "emoji": "✨",
+      "title": "Эзотерика и Таро",
+      "topic_hint": "Толкование одного символа/карты Таро/приметы дня, с развёрнутым объяснением значения.",
+      "site_link": null,
+      "photo_keywords": ["tarot cards mystic candles"]
+    },
+    {
+      "key": "test",
+      "time": "12:30",
+      "emoji": "🧠",
+      "title": "Психологический тест",
+      "topic_hint": "Мини-тест из 3-4 простых вопросов на тему характера/настроения с вариантами ответов и расшифровкой результатов прямо в этом же посте (без внешних ссылок и кнопок).",
+      "site_link": null,
+      "photo_keywords": ["woman thinking quiz question"]
+    },
+    {
+      "key": "mama_rebenok",
+      "time": "13:00",
+      "emoji": "👶",
+      "title": "Мама и ребёнок",
+      "topic_hint": "Практический совет по воспитанию или бытовой ситуации с ребёнком, с объяснением сути и примером.",
+      "site_link": null,
+      "photo_keywords": ["mother child cozy home"]
+    },
+    {
+      "key": "finansy",
+      "time": "13:30",
+      "emoji": "💰",
+      "title": "Личные финансы",
+      "topic_hint": "Разбор одного простого финансового понятия или привычки (накопления, бюджет, подушка безопасности) простыми словами.",
+      "site_link": null,
+      "photo_keywords": ["woman budget planning notebook"]
+    },
+    {
+      "key": "stil",
+      "time": "14:00",
+      "emoji": "👗",
+      "title": "Стиль и образ",
+      "topic_hint": "Разбор одного образа или капсулы гардероба под конкретный случай/сезон, с конкретными деталями.",
+      "site_link": null,
+      "photo_keywords": ["woman fashion style outfit"]
+    },
+    {
+      "key": "krasota",
+      "time": "18:30",
+      "emoji": "💆‍♀️",
+      "title": "Красота и уход",
+      "topic_hint": "Развёрнутый пошаговый гайд по уходу за собой (кожа, волосы) на конкретную тему.",
+      "site_link": null,
+      "photo_keywords": ["skincare beauty routine woman"]
+    },
+    {
+      "key": "istoriya_zhenshiny",
+      "time": "19:00",
+      "emoji": "🌟",
+      "title": "История сильной женщины",
+      "topic_hint": "Обобщённая вдохновляющая история о преодолении трудностей женщиной (без указания реальных фамилий и цитат конкретных людей), с моралью в конце.",
+      "site_link": null,
+      "photo_keywords": ["confident woman sunset silhouette"]
+    },
+    {
+      "key": "narodnaya_mudrost",
+      "time": "19:30",
+      "emoji": "🍃",
+      "title": "Народная мудрость",
+      "topic_hint": "Одна народная примета или бабушкин совет с объяснением, откуда он взялся и что в нём рационального.",
+      "site_link": null,
+      "photo_keywords": ["grandmother wisdom cozy herbs"]
+    },
+    {
+      "key": "vecherniy_ritual",
+      "time": "20:00",
+      "emoji": "🌙",
+      "title": "Вечерний ритуал",
+      "topic_hint": "Практика расслабления перед сном (дыхание, рефлексия дня, благодарность), пошагово.",
+      "site_link": null,
+      "photo_keywords": ["evening relaxation candle tea cozy"]
+    }
+  ]
+}
