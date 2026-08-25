@@ -1,0 +1,46 @@
+# Этот файл нужно положить в репозитории по пути:
+#   .github/workflows/rubric_post.yml
+name: MAX Rubric Autopost
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # каждые 30 минут (время UTC)
+  workflow_dispatch: {}
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Забрать код репозитория
+        uses: actions/checkout@v4
+      - name: Установить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Установить зависимости
+        run: pip install requests pytz
+      - name: Установить российский сертификат Минцифры (нужен для доступа к platform-api2.max.ru)
+        run: |
+          sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_root_ca.crt https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt
+          sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt
+          sudo update-ca-certificates
+      - name: Запустить публикацию по рубрикам
+        run: python rubric_post_to_max.py
+        env:
+          MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
+          MAX_CHAT_ID: ${{ secrets.MAX_CHAT_ID }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
+          YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+          REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      - name: Сохранить журнал опубликованных рубрик
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -f posted_rubrics.json ]; then
+            git add posted_rubrics.json
+            git diff --staged --quiet || git commit -m "Обновлён журнал опубликованных рубрик"
+            git push
+          else
+            echo "posted_rubrics.json ещё не создан — сохранять нечего"
+          fi
