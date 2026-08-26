@@ -7,16 +7,29 @@
       "title": "Доброе утро",
       "topic_hint": "Тёплое утреннее приветствие для женской аудитории, с учётом текущего дня недели (упомяни, какой сегодня день, в позитивном ключе). Настрой на хороший день.",
       "length": "short",
-      "media_type": "video",
       "site_link": null,
-      "video_keywords_by_weekday": {
-        "0": ["monday morning coffee aesthetic vertical"],
-        "1": ["tuesday morning breakfast aesthetic"],
-        "2": ["wednesday morning tea cozy vertical"],
-        "3": ["thursday morning routine aesthetic"],
-        "4": ["friday morning coffee vertical"],
-        "5": ["saturday morning relax cozy vertical"],
-        "6": ["sunday morning cozy blanket vertical"]
+      "photo_keywords_by_weekday": {
+        "0": [
+          "monday morning coffee woman cozy"
+        ],
+        "1": [
+          "tuesday morning breakfast sunny"
+        ],
+        "2": [
+          "wednesday morning tea window"
+        ],
+        "3": [
+          "thursday morning smile woman"
+        ],
+        "4": [
+          "friday morning coffee celebration"
+        ],
+        "5": [
+          "saturday morning relax breakfast"
+        ],
+        "6": [
+          "sunday morning cozy blanket coffee"
+        ]
       }
     },
     {
@@ -26,9 +39,10 @@
       "title": "Гороскоп дня",
       "topic_hint": "Короткая интригующая выжимка про гороскоп на сегодня в целом (без конкретики по знакам, т.к. это не проверить), приглашение узнать свой персональный прогноз на сайте.",
       "length": "short",
-      "media_type": "image",
       "site_link": "https://xn--d1aeghrfjy.online/#horoscope-widget",
-      "photo_keywords": ["zodiac astrology mystic woman"]
+      "photo_keywords": [
+        "zodiac astrology mystic woman"
+      ]
     },
     {
       "key": "layfhak",
@@ -37,9 +51,10 @@
       "title": "Лайфхак для дома",
       "topic_hint": "Один практичный бытовой лайфхак (уборка, хранение, организация пространства) с пошаговым объяснением, почему это работает.",
       "length": "medium",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["cozy home organization tips"]
+      "photo_keywords": [
+        "cozy home organization tips"
+      ]
     },
     {
       "key": "zozh",
@@ -48,9 +63,10 @@
       "title": "ЗОЖ и здоровье",
       "topic_hint": "Разбор одной полезной привычки или мифа о здоровье/питании, с объяснением почему это работает или не работает.",
       "length": "medium",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["healthy lifestyle woman morning"]
+      "photo_keywords": [
+        "healthy lifestyle woman morning"
+      ]
     },
     {
       "key": "recept",
@@ -59,9 +75,10 @@
       "title": "Рецепт дня",
       "topic_hint": "Один несложный кулинарный рецепт (завтрак/лёгкое блюдо) с точными пропорциями ингредиентов и пошаговыми инструкциями.",
       "length": "long",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["healthy breakfast food photography"]
+      "photo_keywords": [
+        "healthy breakfast food photography"
+      ]
     },
     {
       "key": "psy_otnosheniya",
@@ -70,9 +87,10 @@
       "title": "Психология отношений",
       "topic_hint": "Разбор одного распространённого паттерна или ситуации в отношениях (пара, семья, дружба), с практическим советом.",
       "length": "long",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["woman thinking relationship emotional"]
+      "photo_keywords": [
+        "woman thinking relationship emotional"
+      ]
     },
     {
       "key": "ezoterika",
@@ -81,9 +99,10 @@
       "title": "Эзотерика и Таро",
       "topic_hint": "Толкование одного символа/карты Таро/приметы дня, с развёрнутым объяснением значения.",
       "length": "medium",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["tarot cards mystic candles"]
+      "photo_keywords": [
+        "tarot cards mystic candles"
+      ]
     },
     {
       "key": "test",
@@ -92,9 +111,10 @@
       "title": "Психологический тест",
       "topic_hint": "Мини-тест из 3-4 простых вопросов на тему характера/настроения с вариантами ответов и расшифровкой результатов прямо в этом же посте (без внешних ссылок и кнопок).",
       "length": "medium",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["woman thinking quiz question"]
+      "photo_keywords": [
+        "woman thinking quiz question"
+      ]
     },
     {
       "key": "mama_rebenok",
@@ -103,9 +123,10 @@
       "title": "Мама и ребёнок",
       "topic_hint": "Практический совет по воспитанию или бытовой ситуации с ребёнком, с объяснением сути и примером.",
       "length": "medium",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["mother child cozy home"]
+      "photo_keywords": [
+        "mother child cozy home"
+      ]
     },
     {
       "key": "finansy",
@@ -114,9 +135,10 @@
       "title": "Личные финансы",
       "topic_hint": "Разбор одного простого финансового понятия или привычки (накопления, бюджет, подушка безопасности) простыми словами.",
       "length": "medium",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["woman budget planning notebook"]
+      "photo_keywords": [
+        "woman budget planning notebook"
+      ]
     },
     {
       "key": "stil",
@@ -125,9 +147,10 @@
       "title": "Стиль и образ",
       "topic_hint": "Разбор одного образа или капсулы гардероба под конкретный случай/сезон, с конкретными деталями.",
       "length": "short",
-      "media_type": "video",
       "site_link": null,
-      "video_keywords": ["fashion outfit vertical aesthetic", "woman style vertical"]
+      "photo_keywords": [
+        "fashion outfit woman style"
+      ]
     },
     {
       "key": "krasota",
@@ -136,9 +159,10 @@
       "title": "Красота и уход",
       "topic_hint": "Развёрнутый пошаговый гайд по уходу за собой (кожа, волосы) на конкретную тему.",
       "length": "medium",
-      "media_type": "video",
       "site_link": null,
-      "video_keywords": ["skincare routine vertical aesthetic"]
+      "photo_keywords": [
+        "skincare beauty routine woman"
+      ]
     },
     {
       "key": "istoriya_zhenshiny",
@@ -147,9 +171,10 @@
       "title": "История сильной женщины",
       "topic_hint": "Обобщённая вдохновляющая история о преодолении трудностей женщиной (без указания реальных фамилий и цитат конкретных людей), с моралью в конце.",
       "length": "long",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["confident woman sunset silhouette"]
+      "photo_keywords": [
+        "confident woman sunset silhouette"
+      ]
     },
     {
       "key": "narodnaya_mudrost",
@@ -158,9 +183,10 @@
       "title": "Народная мудрость",
       "topic_hint": "Одна народная примета или бабушкин совет с объяснением, откуда он взялся и что в нём рационального.",
       "length": "short",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["grandmother wisdom cozy herbs"]
+      "photo_keywords": [
+        "grandmother wisdom cozy herbs"
+      ]
     },
     {
       "key": "vecherniy_ritual",
@@ -169,9 +195,10 @@
       "title": "Вечерний ритуал",
       "topic_hint": "Практика расслабления перед сном (дыхание, рефлексия дня, благодарность), пошагово.",
       "length": "short",
-      "media_type": "image",
       "site_link": null,
-      "photo_keywords": ["evening relaxation candle tea cozy"]
+      "photo_keywords": [
+        "evening relaxation candle tea cozy"
+      ]
     }
   ]
 }
