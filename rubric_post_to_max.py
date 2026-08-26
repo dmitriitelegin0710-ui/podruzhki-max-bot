@@ -2,8 +2,7 @@
 Скрипт публикации в MAX — по рубрикам вместо Google Таблицы.
 Расписание и темы рубрик — в rubrics.json (лежит рядом с этим файлом).
 Текст поста для каждой рубрики генерирует YandexGPT.
-Картинка — через Pexels Photos API, видео — через Pexels Videos API
-(один и тот же PEXELS_API_KEY на оба).
+Картинка — через Pexels Photos API.
 Отправка в MAX — тот же API, что и раньше.
 
 Запускается по расписанию через GitHub Actions (см. rubric_post.yml),
@@ -46,7 +45,7 @@ POST_STRUCTURE_INSTRUCTIONS = """
 подчёркиваний или обратных кавычек. Пиши обычным простым текстом.
 """
 
-# Длина и структура поста теперь разная по рубрикам — задаётся полем "length" в rubrics.json,
+# Длина и структура поста разная по рубрикам — задаётся полем "length" в rubrics.json,
 # чтобы посты не были все одного шаблонного размера.
 LENGTH_INSTRUCTIONS = {
     "short": (
@@ -145,40 +144,10 @@ def fetch_pexels_image(keywords: list):
         return None
 
 
-def fetch_pexels_video(keywords: list):
-    """Поиск короткого бесплатного видео через официальный Pexels Videos API —
-    тот же ключ, что и для фото, та же лицензия (свободное использование).
-    Видео почти всегда без осмысленного звука — используется как фоновая картинка."""
-    if not keywords or not PEXELS_API_KEY:
-        return None
-    keyword = random.choice(keywords)
-    try:
-        resp = requests.get(
-            "https://api.pexels.com/videos/search",
-            params={"query": keyword, "per_page": 10, "orientation": "portrait"},
-            headers={"Authorization": PEXELS_API_KEY},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        videos = resp.json().get("videos") or []
-        if not videos:
-            print(f"Pexels Videos: по запросу '{keyword}' ничего не нашлось")
-            return None
-        video = random.choice(videos)
-        video_files = sorted(video.get("video_files", []), key=lambda f: f.get("width") or 0)
-        candidates = [f for f in video_files if (f.get("width") or 0) <= 1280] or video_files
-        if not candidates:
-            return None
-        return candidates[-1]["link"]
-    except Exception as e:
-        print(f"Pexels Videos: ошибка запроса ({keyword}) — {e}")
-        return None
-
-
-def upload_media_and_get_token(media_url: str, media_type: str = "image"):
+def upload_media_and_get_token(media_url: str):
     meta_resp = requests.post(
         f"{API_BASE}/uploads",
-        params={"type": media_type},
+        params={"type": "image"},
         headers={"Authorization": BOT_TOKEN},
         timeout=30,
     )
@@ -187,10 +156,9 @@ def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     upload_url = meta["url"]
     token = meta.get("token")
 
-    media_bytes = requests.get(media_url, timeout=120).content
-    filename = "image.jpg" if media_type == "image" else "video.mp4"
-    files = {"data": (filename, media_bytes)}
-    upload_resp = requests.post(upload_url, files=files, timeout=180)
+    media_bytes = requests.get(media_url, timeout=60).content
+    files = {"data": ("image.jpg", media_bytes)}
+    upload_resp = requests.post(upload_url, files=files, timeout=120)
     upload_resp.raise_for_status()
 
     if not token:
@@ -224,17 +192,11 @@ def send_message(text: str, attachments=None) -> requests.Response:
     return requests.post(url, headers=headers, json=payload, timeout=30)
 
 
-def get_media_keywords(rubric: dict, weekday_index: int, media_type: str):
-    if media_type == "video":
-        by_weekday = rubric.get("video_keywords_by_weekday")
-        if by_weekday:
-            return by_weekday.get(str(weekday_index), [])
-        return rubric.get("video_keywords", [])
-    else:
-        by_weekday = rubric.get("photo_keywords_by_weekday")
-        if by_weekday:
-            return by_weekday.get(str(weekday_index), [])
-        return rubric.get("photo_keywords", [])
+def get_photo_keywords(rubric: dict, weekday_index: int):
+    by_weekday = rubric.get("photo_keywords_by_weekday")
+    if by_weekday:
+        return by_weekday.get(str(weekday_index), [])
+    return rubric.get("photo_keywords", [])
 
 
 def main():
@@ -271,18 +233,15 @@ def main():
             continue
 
         attachments = []
-        media_type = rubric.get("media_type", "image")
-        keywords = get_media_keywords(rubric, weekday_index, media_type)
-
-        if media_type == "video":
-            media_url = fetch_pexels_video(keywords)
-        else:
-            media_url = fetch_pexels_image(keywords)
-
-        if media_url:
-            token = upload_media_and_get_token(media_url, media_type)
-            if token:
-                attachments.append({"type": media_type, "payload": {"token": token}})
+        try:
+            keywords = get_photo_keywords(rubric, weekday_index)
+            image_url = fetch_pexels_image(keywords)
+            if image_url:
+                token = upload_media_and_get_token(image_url)
+                if token:
+                    attachments.append({"type": "image", "payload": {"token": token}})
+        except Exception as e:
+            print(f"Рубрика {rubric['key']}: ошибка при подготовке фото — {e}. Публикую без него.")
 
         button = build_link_button_attachment(rubric.get("site_link"))
         if button:
