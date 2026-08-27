@@ -21,3 +21,9 @@ jobs:
 
       - name: Запустить поиск GDELT
         run: python news/gdelt_search.py
+
+      - name: Сохранить articles.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdelt-articles
+          path: news/articles.json
