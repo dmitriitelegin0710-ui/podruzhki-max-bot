@@ -16,8 +16,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Установить requests
-        run: pip install requests
+      - name: Установить зависимости
+        run: pip install -r requirements.txt
 
       - name: Запустить поиск GDELT
         run: python news/gdelt_search.py
