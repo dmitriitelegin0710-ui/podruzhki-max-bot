@@ -29,8 +29,17 @@ jobs:
           echo
           echo "===== END ====="
 
+      - name: Отфильтровать статьи
+        run: python news/filter_articles.py
+
       - name: Сохранить articles.json
         uses: actions/upload-artifact@v4
         with:
           name: gdelt-articles
           path: news/articles.json
+
+      - name: Сохранить отфильтрованные статьи
+        uses: actions/upload-artifact@v4
+        with:
+          name: filtered-articles
+          path: news/filtered_articles.json
