@@ -29,6 +29,7 @@ YANDEX_API_KEY = os.environ["YANDEX_API_KEY"]
 YANDEX_FOLDER_ID = os.environ["YANDEX_FOLDER_ID"]
 
 RUBRICS_FILE = "rubrics.json"
+HOLIDAYS_FILE = "max_women_holidays.json"
 STATE_FILE = "posted_rubrics.json"
 TIMEZONE = "Europe/Moscow"
 API_BASE = "https://platform-api2.max.ru"
@@ -84,6 +85,106 @@ LENGTH_INSTRUCTIONS = {
 def load_rubrics():
     with open(RUBRICS_FILE, encoding="utf-8") as f:
         return json.load(f)["rubrics"]
+
+
+def load_holidays() -> dict:
+    with open(HOLIDAYS_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _weekday_number(name: str) -> int:
+    return {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }[name]
+
+
+def _month_number(name: str) -> int:
+    return {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }[name]
+
+
+def _matches_floating_rule(rule: str, target_date) -> bool:
+    # Поддерживаются только правила, реально записанные в max_women_holidays.json.
+    if rule == "256th_day_of_year":
+        return target_date.timetuple().tm_yday == 256
+
+    match = re.fullmatch(
+        r"(first|second|third|fourth|last)_(monday|tuesday|wednesday|thursday|friday|saturday|sunday)_of_"
+        r"(january|february|march|april|may|june|july|august|september|october|november|december)",
+        rule,
+    )
+    if not match:
+        return False
+
+    ordinal, weekday_name, month_name = match.groups()
+    month = _month_number(month_name)
+    weekday = _weekday_number(weekday_name)
+
+    if target_date.month != month or target_date.weekday() != weekday:
+        return False
+
+    if ordinal == "last":
+        next_week = target_date + __import__("datetime").timedelta(days=7)
+        return next_week.month != month
+
+    ordinal_number = {
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+    }[ordinal]
+    return ((target_date.day - 1) // 7 + 1) == ordinal_number
+
+
+def get_holiday_for_date(target_date, holidays: dict):
+    candidates = []
+
+    date_key = target_date.strftime("%m-%d")
+    candidates.extend(holidays.get("dates", {}).get(date_key, []))
+
+    for item in holidays.get("floating_dates", []):
+        if _matches_floating_rule(item.get("rule", ""), target_date):
+            candidates.append(item)
+
+    if not candidates:
+        return None
+
+    # Сначала используем priority из самого JSON.
+    priority_order = holidays.get(
+        "priority_order",
+        ["very_high", "high", "medium", "low"],
+    )
+    priority_rank = {
+        value: index for index, value in enumerate(priority_order)
+    }
+
+    # При одинаковом priority сохраняем порядок записей в JSON.
+    return min(
+        enumerate(candidates),
+        key=lambda pair: (priority_rank.get(pair[1].get("priority"), len(priority_rank)), pair[0]),
+    )[1]
+
+
+def format_holiday_paragraph(holiday: dict) -> str:
+    return f"\n\n🌷 **А ещё сегодня — {holiday['name']}!**\n{holiday['text']}"
 
 
 def load_state() -> set:
@@ -244,6 +345,7 @@ def main():
     print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')} ({weekday_name}, {season})")
 
     rubrics = load_rubrics()
+    holidays = load_holidays()
     state = load_state()
     changed = False
 
@@ -262,6 +364,12 @@ def main():
 
         try:
             text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
+
+            if rubric["key"] == "utro_privet":
+                holiday = get_holiday_for_date(now.date(), holidays)
+                if holiday:
+                    text += format_holiday_paragraph(holiday)
+                    print(f"Праздник на сегодня: {holiday['name']}")
         except Exception as e:
             print(f"Рубрика {rubric['key']}: ошибка генерации текста — {e}. Пропускаю на этот раз.")
             continue
