@@ -33,7 +33,15 @@ STATE_FILE = "posted_rubrics.json"
 TIMEZONE = "Europe/Moscow"
 API_BASE = "https://platform-api2.max.ru"
 YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+# Версия модели закреплена явно (не "latest"), чтобы Яндекс не мог молча
+# подменить её на другую ревизию/уровень мощности.
+YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 DEFAULT_BUTTON_TEXT = "Читать на сайте"
+
+MONTHS_RU = [
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+]
 
 POST_STRUCTURE_INSTRUCTIONS = """
 Ты — автор постов для женского паблика в мессенджере MAX. Пиши по-русски, живо и по-доброму,
@@ -41,8 +49,16 @@ POST_STRUCTURE_INSTRUCTIONS = """
 
 Не используй хэштеги. Не придумывай цитаты реальных людей.
 Не добавляй никаких ссылок в текст — ссылка (если нужна) добавляется отдельно кнопкой.
-НЕ используй Markdown-разметку вообще: никаких звёздочек (**жирный**), решёток (### заголовок),
-подчёркиваний или обратных кавычек. Пиши обычным простым текстом.
+
+РАЗМЕТКА (мессенджер MAX поддерживает её нативно, форматирование реально появится в посте):
+  **жирный текст** — используй для смысловых подзаголовков и ключевых фраз внутри поста
+  _курсив_ — для лёгкого смыслового акцента, изредка
+  ++подчёркивание++ — совсем понемногу, для одной самой важной мысли или вывода в посте
+Используй это ПО СМЫСЛУ (не на каждое слово и не в каждом абзаце), примерно как человек
+вручную выделяет самое важное в тексте.
+НЕ используй заголовки через "#", НЕ используй обратные кавычки для кода, НЕ используй "*"
+как маркер списка — для списков используй "• ".
+Абзацы разделяй пустой строкой.
 """
 
 # Длина и структура поста разная по рубрикам — задаётся полем "length" в rubrics.json,
@@ -82,30 +98,45 @@ def save_state(state: set) -> None:
         json.dump(sorted(state), f, ensure_ascii=False)
 
 
-def strip_markdown(text: str) -> str:
-    """Подстраховка на случай, если YandexGPT всё же добавит Markdown-разметку,
-    несмотря на прямой запрет в промпте — убираем символы, оставляя сам текст."""
+def get_season(month: int) -> str:
+    if month in (12, 1, 2):
+        return "зима"
+    if month in (3, 4, 5):
+        return "весна"
+    if month in (6, 7, 8):
+        return "лето"
+    return "осень"
+
+
+def clean_formatting(text: str) -> str:
+    """MAX умеет показывать **жирный**, _курсив_ и ++подчёркивание++ — это НЕ вырезаем.
+    Убираем только то, что MAX не поддерживает или что модель иногда добавляет по ошибке:
+    markdown-заголовки (### ...), код в обратных кавычках, зачёркивание, и одиночные
+    "лишние" звёздочки-маркеры списков (модели иногда тянет писать "* пункт" вместо "• пункт")."""
     text = re.sub(r'#{1,6}\s*', '', text)
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    text = re.sub(r'_(.+?)_', r'\1', text)
-    text = re.sub(r'`(.+?)`', r'\1', text)
+    text = re.sub(r'`{1,3}(.+?)`{1,3}', r'\1', text)
+    text = re.sub(r'~~(.+?)~~', r'\1', text)
+    # одиночная "*", не входящая в пару "**", — это случайный маркер списка, а не разметка
+    text = re.sub(r'(?<!\*)\*(?!\*)\s*', '', text)
     return text.strip()
 
 
-def generate_text(rubric: dict, weekday_name: str) -> str:
+def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str) -> str:
     length_key = rubric.get("length", "medium")
     length_instruction = LENGTH_INSTRUCTIONS.get(length_key, LENGTH_INSTRUCTIONS["medium"])
 
     prompt = (
         f"{POST_STRUCTURE_INSTRUCTIONS}\n\n"
+        f"Точная сегодняшняя дата: {date_human} ({weekday_name}). Время года сейчас: {season}.\n"
+        f"Ориентируйся ТОЛЬКО на эту дату и это время года при любых упоминаниях дат, сезона, "
+        f"праздников, планов на будущее, гардероба и т.п. Никогда не называй никакую другую "
+        f"дату, день недели или время года — используй строго те, что указаны выше.\n\n"
         f"{length_instruction}\n\n"
         f"Рубрика: {rubric['title']}\n"
-        f"Сегодня: {weekday_name}\n"
         f"Тема поста: {rubric['topic_hint']}"
     )
     body = {
-        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt-lite/latest",
+        "modelUri": YANDEXGPT_MODEL_URI_TEMPLATE.format(folder_id=YANDEX_FOLDER_ID),
         "completionOptions": {"stream": False, "temperature": 0.7, "maxTokens": 800},
         "messages": [{"role": "user", "text": prompt}],
     }
@@ -117,7 +148,7 @@ def generate_text(rubric: dict, weekday_name: str) -> str:
     resp.raise_for_status()
     data = resp.json()
     raw_text = data["result"]["alternatives"][0]["message"]["text"].strip()
-    return strip_markdown(raw_text)
+    return clean_formatting(raw_text)
 
 
 def fetch_pexels_image(keywords: list):
@@ -186,7 +217,8 @@ def build_link_button_attachment(site_url, button_text=None):
 def send_message(text: str, attachments=None) -> requests.Response:
     url = f"{API_BASE}/messages?chat_id={CHAT_ID}"
     headers = {"Authorization": BOT_TOKEN}
-    payload = {"text": text}
+    # format="markdown" — включает реальное форматирование MAX (**bold**, ++underline++, _italic_)
+    payload = {"text": text, "format": "markdown"}
     if attachments:
         payload["attachments"] = attachments
     return requests.post(url, headers=headers, json=payload, timeout=30)
@@ -206,8 +238,10 @@ def main():
     weekday_index = now.weekday()  # 0 = понедельник
     weekday_names = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
     weekday_name = weekday_names[weekday_index]
+    date_human = f"{now.day} {MONTHS_RU[now.month - 1]} {now.year} года"
+    season = get_season(now.month)
 
-    print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')} ({weekday_name})")
+    print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')} ({weekday_name}, {season})")
 
     rubrics = load_rubrics()
     state = load_state()
@@ -227,7 +261,7 @@ def main():
         print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
 
         try:
-            text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name)
+            text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
         except Exception as e:
             print(f"Рубрика {rubric['key']}: ошибка генерации текста — {e}. Пропускаю на этот раз.")
             continue
