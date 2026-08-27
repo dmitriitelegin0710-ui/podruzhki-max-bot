@@ -20,6 +20,50 @@ headers = {
 }
 
 
+def get_gdelt():
+    for attempt in range(1, 4):
+        print(f"Попытка GDELT: {attempt}/3")
+
+        try:
+            response = requests.get(
+                GDELT_URL,
+                params=params,
+                headers=headers,
+                timeout=60
+            )
+
+            print("HTTP:", response.status_code)
+
+            if response.status_code == 429:
+                if attempt < 3:
+                    print("GDELT временно ограничил запросы.")
+                    print("Ждём 60 секунд...")
+                    time.sleep(60)
+                    continue
+
+                print("GDELT всё ещё возвращает 429.")
+                return None
+
+            response.raise_for_status()
+            return response.json()
+
+        except requests.exceptions.Timeout:
+            print("Таймаут GDELT.")
+
+            if attempt < 3:
+                print("Ждём 30 секунд...")
+                time.sleep(30)
+
+        except requests.exceptions.RequestException as e:
+            print("Ошибка GDELT:", e)
+
+            if attempt < 3:
+                print("Ждём 30 секунд...")
+                time.sleep(30)
+
+    return None
+
+
 def extract_text(url):
     try:
         response = requests.get(
@@ -31,7 +75,10 @@ def extract_text(url):
         if response.status_code != 200:
             return ""
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
 
         for tag in soup([
             "script",
@@ -55,24 +102,24 @@ def extract_text(url):
         return "\n".join(paragraphs)
 
     except Exception as e:
-        print("Ошибка загрузки:", e)
+        print("Ошибка загрузки статьи:", e)
         return ""
 
 
 print("Запрашиваем GDELT...")
+print()
 
-response = requests.get(
-    GDELT_URL,
-    params=params,
-    headers=headers,
-    timeout=60
-)
+data = get_gdelt()
 
-response.raise_for_status()
+if data is None:
+    print()
+    print("GDELT недоступен после нескольких попыток.")
+    print("Запуск остановлен.")
+    raise SystemExit(1)
 
-data = response.json()
 articles = data.get("articles", [])
 
+print()
 print("GDELT нашёл:", len(articles))
 
 result = []
@@ -84,10 +131,12 @@ for number, article in enumerate(articles, 1):
     domain = article.get("domain", "")
     date = article.get("seendate", "")
 
-    print(f"\n[{number}/{len(articles)}] {title}")
+    print()
+    print(f"[{number}/{len(articles)}] {title}")
     print("Источник:", domain)
 
     if not url:
+        print("Нет URL — пропускаем.")
         continue
 
     text = extract_text(url)
@@ -109,7 +158,12 @@ for number, article in enumerate(articles, 1):
     time.sleep(1)
 
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+with open(
+    OUTPUT_FILE,
+    "w",
+    encoding="utf-8"
+) as f:
+
     json.dump(
         result,
         f,
@@ -117,8 +171,10 @@ with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         indent=2
     )
 
-print("\n==============================")
+
+print()
+print("=" * 50)
 print("ГОТОВО")
 print("Статей сохранено:", len(result))
 print("Файл:", OUTPUT_FILE)
-print("==============================")
+print("=" * 50)
