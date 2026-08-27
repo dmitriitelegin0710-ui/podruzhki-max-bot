@@ -6,69 +6,90 @@ from bs4 import BeautifulSoup
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 OUTPUT_FILE = "news/articles.json"
 
-params = {
-    "query": "entertainment sourcelang:russian",
-    "mode": "artlist",
-    "format": "json",
-    "maxrecords": 20,
-    "timespan": "24h",
-    "sort": "datedesc",
-}
-
-headers = {
+HEADERS = {
     "User-Agent": "Mozilla/5.0"
 }
 
+# Поисковые запросы GDELT.
+# Термины на английском, sourcelang:russian —
+# русскоязычные оригинальные источники.
+QUERIES = [
+    "celebrity sourcelang:russian",
+    "singer sourcelang:russian",
+    "actress sourcelang:russian",
+    "actor sourcelang:russian",
+    "musician sourcelang:russian",
+    "television sourcelang:russian",
+    "cinema sourcelang:russian",
+]
 
-def get_gdelt():
+
+def gdelt_search(query):
+    """Получить новости из GDELT с защитой от 429."""
+
+    params = {
+        "query": query,
+        "mode": "artlist",
+        "format": "json",
+        "maxrecords": 10,
+        "timespan": "24h",
+        "sort": "datedesc",
+    }
+
     for attempt in range(1, 4):
-        print(f"Попытка GDELT: {attempt}/3")
+        print(f"  Запрос: {query}")
+        print(f"  Попытка: {attempt}/3")
 
         try:
             response = requests.get(
                 GDELT_URL,
                 params=params,
-                headers=headers,
+                headers=HEADERS,
                 timeout=60
             )
 
-            print("HTTP:", response.status_code)
+            print(f"  HTTP: {response.status_code}")
 
             if response.status_code == 429:
                 if attempt < 3:
-                    print("GDELT временно ограничил запросы.")
-                    print("Ждём 60 секунд...")
-                    time.sleep(60)
+                    print("  GDELT ограничил частоту. Ждём 30 секунд...")
+                    time.sleep(30)
                     continue
 
-                print("GDELT всё ещё возвращает 429.")
-                return None
+                print("  Не удалось получить ответ после 3 попыток.")
+                return []
 
             response.raise_for_status()
-            return response.json()
+
+            data = response.json()
+            return data.get("articles", [])
 
         except requests.exceptions.Timeout:
-            print("Таймаут GDELT.")
+            print("  Таймаут.")
 
             if attempt < 3:
-                print("Ждём 30 секунд...")
-                time.sleep(30)
+                time.sleep(15)
 
         except requests.exceptions.RequestException as e:
-            print("Ошибка GDELT:", e)
+            print(f"  Ошибка: {e}")
 
             if attempt < 3:
-                print("Ждём 30 секунд...")
-                time.sleep(30)
+                time.sleep(15)
 
-    return None
+        except ValueError:
+            print("  GDELT вернул некорректный JSON.")
+            return []
+
+    return []
 
 
 def extract_text(url):
+    """Скачать страницу и извлечь текст статьи."""
+
     try:
         response = requests.get(
             url,
-            headers=headers,
+            headers=HEADERS,
             timeout=20
         )
 
@@ -80,6 +101,8 @@ def extract_text(url):
             "html.parser"
         )
 
+        # Удаляем элементы, которые почти никогда
+        # не являются текстом самой новости.
         for tag in soup([
             "script",
             "style",
@@ -87,64 +110,119 @@ def extract_text(url):
             "header",
             "footer",
             "aside",
-            "form"
+            "form",
+            "noscript",
+            "svg"
         ]):
             tag.decompose()
 
         paragraphs = []
 
-        for p in soup.find_all("p"):
-            text = p.get_text(" ", strip=True)
+        for paragraph in soup.find_all("p"):
+            text = paragraph.get_text(
+                " ",
+                strip=True
+            )
 
             if len(text) >= 40:
                 paragraphs.append(text)
 
-        return "\n".join(paragraphs)
+        # Удаляем одинаковые абзацы.
+        unique_paragraphs = []
+        seen = set()
+
+        for paragraph in paragraphs:
+            if paragraph not in seen:
+                seen.add(paragraph)
+                unique_paragraphs.append(paragraph)
+
+        return "\n".join(unique_paragraphs)
 
     except Exception as e:
-        print("Ошибка загрузки статьи:", e)
+        print(f"  Ошибка загрузки статьи: {e}")
         return ""
 
 
-print("Запрашиваем GDELT...")
+print("=" * 70)
+print("GDELT — ПОИСК НОВОСТЕЙ ШОУ-БИЗНЕСА")
+print("=" * 70)
 print()
 
-data = get_gdelt()
+all_articles = {}
 
-if data is None:
+# ---------------------------------------------------------
+# 1. Получаем кандидатов из GDELT
+# ---------------------------------------------------------
+
+for query in QUERIES:
+
+    articles = gdelt_search(query)
+
+    print(f"  Получено: {len(articles)}")
     print()
-    print("GDELT недоступен после нескольких попыток.")
-    print("Запуск остановлен.")
-    raise SystemExit(1)
 
-articles = data.get("articles", [])
+    for article in articles:
 
+        url = article.get("url")
+
+        if not url:
+            continue
+
+        # Дубликаты убираем сразу по URL.
+        all_articles[url] = article
+
+    # Небольшая пауза между запросами.
+    time.sleep(5)
+
+
+print("=" * 70)
+print(f"УНИКАЛЬНЫХ КАНДИДАТОВ: {len(all_articles)}")
+print("=" * 70)
 print()
-print("GDELT нашёл:", len(articles))
+
+
+# ---------------------------------------------------------
+# 2. Скачиваем полный текст
+# ---------------------------------------------------------
 
 result = []
 
-for number, article in enumerate(articles, 1):
+articles_list = list(all_articles.values())
+
+for number, article in enumerate(articles_list, 1):
 
     title = article.get("title", "")
     url = article.get("url", "")
     domain = article.get("domain", "")
     date = article.get("seendate", "")
 
-    print()
-    print(f"[{number}/{len(articles)}] {title}")
+    print(
+        f"[{number}/{len(articles_list)}] "
+        f"{title}"
+    )
+
     print("Источник:", domain)
 
     if not url:
         print("Нет URL — пропускаем.")
+        print()
         continue
 
     text = extract_text(url)
 
-    print("Текст:", len(text), "символов")
+    print(
+        "Текст:",
+        len(text),
+        "символов"
+    )
 
+    # Очень короткие страницы не отправляем дальше.
     if len(text) < 300:
-        print("Пропускаем — текста недостаточно.")
+        print(
+            "Пропускаем — "
+            "текста недостаточно."
+        )
+        print()
         continue
 
     result.append({
@@ -155,26 +233,35 @@ for number, article in enumerate(articles, 1):
         "text": text
     })
 
+    print("Сохранено.")
+    print()
+
+    # Не долбим сайты слишком быстро.
     time.sleep(1)
 
+
+# ---------------------------------------------------------
+# 3. Сохраняем результат
+# ---------------------------------------------------------
 
 with open(
     OUTPUT_FILE,
     "w",
     encoding="utf-8"
-) as f:
+) as file:
 
     json.dump(
         result,
-        f,
+        file,
         ensure_ascii=False,
         indent=2
     )
 
 
-print()
-print("=" * 50)
+print("=" * 70)
 print("ГОТОВО")
-print("Статей сохранено:", len(result))
+print("=" * 70)
+print("Уникальных кандидатов:", len(all_articles))
+print("Статей с текстом:", len(result))
 print("Файл:", OUTPUT_FILE)
-print("=" * 50)
+print("=" * 70)
