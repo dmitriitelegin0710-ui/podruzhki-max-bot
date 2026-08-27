@@ -1,62 +1,52 @@
 import requests
+import time
 
 URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-queries = [
-    "актриса",
-    "певица",
-    "актер",
-    "звезда",
-    "шоу-бизнес",
-    "шоубизнес",
-    "кино",
-    "телевидение",
-    "музыка",
-    "артист",
-]
+query = """
+(singer OR actress OR actor OR celebrity OR musician OR
+"show business" OR entertainment OR television OR cinema)
+sourcelang:russian
+"""
 
-all_articles = {}
+params = {
+    "query": query,
+    "mode": "artlist",
+    "format": "json",
+    "maxrecords": 50,
+    "timespan": "24h",
+    "sort": "datedesc",
+}
 
-for query in queries:
-    print(f"\n=== ПОИСК: {query} ===")
+print("Запрашиваем GDELT...")
+print("Ищем русскоязычные новости шоу-бизнеса за последние 24 часа.")
+print()
 
-    params = {
-        "query": query,
-        "mode": "artlist",
-        "format": "json",
-        "maxrecords": 10,
-        "timespan": "24h",
-        "sort": "datedesc",
-    }
+try:
+    response = requests.get(
+        URL,
+        params=params,
+        timeout=60,
+    )
 
-    try:
-        response = requests.get(URL, params=params, timeout=30)
-        response.raise_for_status()
+    print("HTTP:", response.status_code)
 
-        data = response.json()
-        articles = data.get("articles", [])
+    response.raise_for_status()
 
-        print(f"Найдено: {len(articles)}")
+    data = response.json()
+    articles = data.get("articles", [])
 
-        for article in articles:
-            url = article.get("url")
+    print(f"Найдено новостей: {len(articles)}")
+    print()
 
-            if url:
-                all_articles[url] = article
+    for number, article in enumerate(articles, 1):
+        print(f"#{number}")
+        print("Дата:", article.get("seendate"))
+        print("Заголовок:", article.get("title"))
+        print("Источник:", article.get("domain"))
+        print("URL:", article.get("url"))
+        print("-" * 70)
 
-    except Exception as e:
-        print(f"Ошибка: {e}")
-
-
-print("\n")
-print("=" * 70)
-print(f"ВСЕГО УНИКАЛЬНЫХ НОВОСТЕЙ: {len(all_articles)}")
-print("=" * 70)
-
-for number, article in enumerate(all_articles.values(), 1):
-    print(f"\n#{number}")
-    print("Дата:", article.get("seendate"))
-    print("Заголовок:", article.get("title"))
-    print("Источник:", article.get("domain"))
-    print("URL:", article.get("url"))
-    print("-" * 70)
+except Exception as e:
+    print("ОШИБКА:")
+    print(e)
