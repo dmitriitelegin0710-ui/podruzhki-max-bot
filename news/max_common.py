@@ -20,6 +20,8 @@ PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 API_BASE = "https://platform-api2.max.ru"
 DEFAULT_BUTTON_TEXT = "Читать на сайте"
 
+DOWNLOAD_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
 
 def fetch_pexels_image(keywords: list):
     """Случайное фото из нескольких результатов (не всегда первое) —
@@ -57,7 +59,9 @@ def upload_media_and_get_token(media_url: str):
     upload_url = meta["url"]
     token = meta.get("token")
 
-    media_bytes = requests.get(media_url, timeout=60).content
+    # User-Agent нужен, т.к. некоторые сайты-источники блокируют запросы
+    # без него (в т.ч. при скачивании их og:image для новостных постов).
+    media_bytes = requests.get(media_url, timeout=60, headers=DOWNLOAD_HEADERS).content
     files = {"data": ("image.jpg", media_bytes)}
     upload_resp = requests.post(upload_url, files=files, timeout=120)
     upload_resp.raise_for_status()
