@@ -1,9 +1,15 @@
 name: News Rewrite & Post
 on:
+  schedule:
+    # 10:17, 15:17, 21:17 по Москве — между кластерами рубрик, не в круглый час.
+    - cron: "17 7,12,18 * * *"
   workflow_dispatch: {}
 jobs:
   post:
     runs-on: ubuntu-latest
+    concurrency:
+      group: news-post
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
