@@ -1,10 +1,19 @@
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 INPUT_FILE = Path("news/articles.json")
 OUTPUT_FILE = Path("news/filtered_articles.json")
+
+
+def is_russian_domain(url: str) -> bool:
+    """Оставляем только .ru-домены — sourcelang:russian в GDELT ловит
+    русскоязычные сайты по всему миру (.kz, .by, .com и т.п.), а не
+    только российские."""
+    domain = urlparse(url).netloc.lower()
+    return domain.endswith(".ru")
 
 
 # Слова и фразы, характерные для шоу-бизнеса.
@@ -215,6 +224,9 @@ def is_good_article(article):
     новость шоу-бизнеса.
     """
 
+    if not is_russian_domain(article.get("url", "")):
+        return False
+
     title = normalize(article.get("title", ""))
     text = normalize(article.get("text", ""))
     source = normalize(article.get("source", ""))
@@ -286,6 +298,7 @@ def make_clean_article(article):
         "url": article.get("url", "").strip(),
         "date": article.get("date", "").strip(),
         "text": article.get("text", "").strip(),
+        "image_url": article.get("image_url"),
     }
 
 
