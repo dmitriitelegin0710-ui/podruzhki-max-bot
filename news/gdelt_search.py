@@ -2,6 +2,7 @@ import json
 import time
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 OUTPUT_FILE = "news/articles.json"
@@ -11,8 +12,9 @@ HEADERS = {
 }
 
 QUERIES = [
-    "celebrity sourcelang:russian",
-    "entertainment sourcelang:russian",
+    "шоу-бизнес sourcelang:russian",
+    "знаменитости sourcelang:russian",
+    "звезды шоу-бизнеса sourcelang:russian",
 ]
 
 
@@ -57,6 +59,16 @@ def search_gdelt(query):
     return []
 
 
+def extract_image(soup, base_url):
+    """Пытается найти og:image / twitter:image статьи — реальное фото,
+    относящееся к новости, а не общий стоковый снимок."""
+    for prop in ["og:image", "og:image:secure_url", "twitter:image"]:
+        tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
+        if tag and tag.get("content"):
+            return urljoin(base_url, tag["content"].strip())
+    return None
+
+
 def extract_text(url):
     try:
         response = requests.get(
@@ -66,12 +78,14 @@ def extract_text(url):
         )
 
         if response.status_code != 200:
-            return ""
+            return "", None
 
         soup = BeautifulSoup(
             response.text,
             "html.parser"
         )
+
+        image_url = extract_image(soup, url)
 
         for tag in soup([
             "script",
@@ -103,11 +117,11 @@ def extract_text(url):
                 seen.add(text)
                 unique.append(text)
 
-        return "\n".join(unique)
+        return "\n".join(unique), image_url
 
     except Exception as e:
         print("Ошибка загрузки:", e)
-        return ""
+        return "", None
 
 
 print("=" * 60)
@@ -150,9 +164,10 @@ for number, article in enumerate(articles, 1):
     print(f"[{number}/{len(articles)}] {title}")
     print("Источник:", source)
 
-    text = extract_text(url)
+    text, image_url = extract_text(url)
 
     print("Текст:", len(text), "символов")
+    print("Картинка:", image_url or "не найдена")
 
     if len(text) >= 300:
         result.append({
@@ -160,7 +175,8 @@ for number, article in enumerate(articles, 1):
             "source": source,
             "url": url,
             "date": date,
-            "text": text
+            "text": text,
+            "image_url": image_url,
         })
         print("Сохранено.")
     else:
