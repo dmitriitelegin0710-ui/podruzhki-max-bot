@@ -6,12 +6,15 @@ on:
     # Каждые 15 минут, но НЕ в круглые :00/:30 (в них чаще всего скапливаются
     # чужие workflow по всему миру, и тик GitHub может задерживаться/теряться).
     # Время UTC. Окно 3:00–17:59 UTC = 6:00–20:59 по Москве — с запасом
-    # покрывает все рубрики (первая в 06:30, последняя в 20:00 МСК).
+    # покрывает все рубрики (первая в 07:00, последняя в 20:00 МСК).
     - cron: "7,22,37,52 3-17 * * *"
   workflow_dispatch: {}
 jobs:
   post:
     runs-on: ubuntu-latest
+    concurrency:
+      group: rubric-post
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
