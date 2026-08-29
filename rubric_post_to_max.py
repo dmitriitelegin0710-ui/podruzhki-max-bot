@@ -35,6 +35,7 @@ TAROT_FILE = "tarot_deck_78.json"
 NUMEROLOGY_FILE = "numerology.json"
 PALMISTRY_FILE = "palmistry.json"
 OMENS_FILE = "omens.json"
+WOMEN_STORIES_FILE = "women_success_stories.json"
 TIMEZONE = "Europe/Moscow"
 API_BASE = "https://platform-api2.max.ru"
 YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
@@ -284,6 +285,35 @@ def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
     )
 
 
+STORY_CLOSING_LINES = [
+    "Её история — ещё одно напоминание: сила не в отсутствии трудностей, а в том, как их проходишь.",
+    "Иногда самый обычный день становится точкой отсчёта для чего-то большого.",
+    "Такие истории хочется перечитывать в моменты, когда опускаются руки.",
+    "Трудности никуда не исчезают — просто однажды перестают быть главным препятствием.",
+    "Вот что бывает, когда не сдаются даже тогда, когда шансов почти не видно.",
+]
+
+
+def build_istoriya_zhenshiny_post(target_date) -> str:
+    """Пост для рубрики «История сильной женщины» собирается напрямую из
+    women_success_stories.json — БЕЗ обращения к YandexGPT. Только реальные факты,
+    оформленные под фирменный стиль канала (эмодзи, жирный текст MAX-разметки, структура).
+    История дня выбирается по номеру календарного дня — полный проход по списку без
+    повторов, прежде чем начать заново."""
+    stories = load_json_file(WOMEN_STORIES_FILE)["stories"]
+    story = stories[target_date.toordinal() % len(stories)]
+    closing = STORY_CLOSING_LINES[target_date.toordinal() % len(STORY_CLOSING_LINES)]
+
+    return (
+        f"{story.get('emoji', '🌟')} **{story['name']}**\n\n"
+        f"{story['hook']}\n\n"
+        f"**Трудность:** {story['challenge']}\n\n"
+        f"**Что она сделала:** {story['achievement']}\n\n"
+        f"_Сфера: {story['sphere']} · {story['era']}_\n\n"
+        f"++{closing}++"
+    )
+
+
 def load_state() -> set:
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, encoding="utf-8") as f:
@@ -373,10 +403,40 @@ def fetch_pexels_image(keywords: list):
         return None
 
 
-def upload_media_and_get_token(media_url: str):
+def fetch_pexels_video(keywords: list):
+    """Короткое вертикальное видео с Pexels Videos (тот же PEXELS_API_KEY, что и для фото,
+    отдельного секрета не требуется). Возвращает прямую ссылку на mp4-файл."""
+    if not keywords or not PEXELS_API_KEY:
+        return None
+    keyword = random.choice(keywords)
+    try:
+        resp = requests.get(
+            "https://api.pexels.com/videos/search",
+            params={"query": keyword, "per_page": 10, "orientation": "portrait"},
+            headers={"Authorization": PEXELS_API_KEY},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        videos = resp.json().get("videos") or []
+        if not videos:
+            print(f"Pexels video: по запросу '{keyword}' ничего не нашлось")
+            return None
+        video = random.choice(videos)
+        mp4_files = [vf for vf in (video.get("video_files") or []) if vf.get("file_type") == "video/mp4"]
+        if not mp4_files:
+            return None
+        # берём файл с шириной ближе к 720px — не самое тяжёлое и не самое мыльное качество
+        chosen = min(mp4_files, key=lambda vf: abs((vf.get("width") or 0) - 720))
+        return chosen.get("link")
+    except Exception as e:
+        print(f"Pexels video: ошибка запроса ({keyword}) — {e}")
+        return None
+
+
+def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     meta_resp = requests.post(
         f"{API_BASE}/uploads",
-        params={"type": "image"},
+        params={"type": media_type},
         headers={"Authorization": BOT_TOKEN},
         timeout=30,
     )
@@ -385,12 +445,15 @@ def upload_media_and_get_token(media_url: str):
     upload_url = meta["url"]
     token = meta.get("token")
 
-    media_bytes = requests.get(media_url, timeout=60).content
-    files = {"data": ("image.jpg", media_bytes)}
-    upload_resp = requests.post(upload_url, files=files, timeout=120)
+    media_bytes = requests.get(media_url, timeout=120).content
+    filename = "video.mp4" if media_type == "video" else "image.jpg"
+    files = {"data": (filename, media_bytes)}
+    upload_resp = requests.post(upload_url, files=files, timeout=180)
     upload_resp.raise_for_status()
 
     if not token:
+        # Для video/audio ответ загрузки — служебный XML без токена (он уже был в meta выше),
+        # поэтому json() здесь ожидаемо может не сработать для видео — это нормально.
         try:
             body = upload_resp.json()
             token = body.get("token")
@@ -427,6 +490,52 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
     if by_weekday:
         return by_weekday.get(str(weekday_index), [])
     return rubric.get("photo_keywords", [])
+
+
+def get_video_keywords(rubric: dict, weekday_index: int):
+    """Если для рубрики не заданы отдельные ключевые слова под видео
+    (video_keywords / video_keywords_by_weekday), используются те же слова, что для фото."""
+    by_weekday = rubric.get("video_keywords_by_weekday")
+    if by_weekday:
+        return by_weekday.get(str(weekday_index), [])
+    if rubric.get("video_keywords"):
+        return rubric["video_keywords"]
+    return get_photo_keywords(rubric, weekday_index)
+
+
+def fetch_and_upload_media(rubric: dict, weekday_index: int):
+    """Готовит вложение (фото или видео) для поста. Поведение управляется
+    необязательным полем rubric["media"]:
+      не задано / "photo" — как раньше, только фото с Pexels Photos;
+      "video"  — только короткое видео с Pexels Videos;
+      "random" — вероятность 40% на видео, иначе фото; если предпочтённый тип
+        не нашёлся (пустой результат поиска), подстраховываемся вторым типом,
+        чтобы пост не остался совсем без картинки.
+    Возвращает готовый attachment-словарь либо None."""
+
+    def try_photo():
+        url = fetch_pexels_image(get_photo_keywords(rubric, weekday_index))
+        if not url:
+            return None
+        token = upload_media_and_get_token(url, media_type="image")
+        return {"type": "image", "payload": {"token": token}} if token else None
+
+    def try_video():
+        url = fetch_pexels_video(get_video_keywords(rubric, weekday_index))
+        if not url:
+            return None
+        token = upload_media_and_get_token(url, media_type="video")
+        return {"type": "video", "payload": {"token": token}} if token else None
+
+    media_mode = rubric.get("media", "photo")
+
+    if media_mode == "video":
+        return try_video() or try_photo()
+    if media_mode == "random":
+        if random.random() < 0.4:
+            return try_video() or try_photo()
+        return try_photo() or try_video()
+    return try_photo()
 
 
 def main():
@@ -467,18 +576,20 @@ def main():
         print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
 
         try:
-            active_rubric = rubric
-            if rubric["key"] == "ezoterika":
-                try:
-                    ezoterika_topic = get_ezoterika_topic_hint(weekday_index, now.date())
-                    active_rubric = {**rubric, "topic_hint": ezoterika_topic}
-                except Exception as e:
-                    print(
-                        f"Рубрика ezoterika: не удалось подготовить факт из JSON ({e}), "
-                        "публикую с topic_hint по умолчанию"
-                    )
-
-            text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
+            if rubric["key"] == "istoriya_zhenshiny":
+                text = build_istoriya_zhenshiny_post(now.date())
+            else:
+                active_rubric = rubric
+                if rubric["key"] == "ezoterika":
+                    try:
+                        ezoterika_topic = get_ezoterika_topic_hint(weekday_index, now.date())
+                        active_rubric = {**rubric, "topic_hint": ezoterika_topic}
+                    except Exception as e:
+                        print(
+                            f"Рубрика ezoterika: не удалось подготовить факт из JSON ({e}), "
+                            "публикую с topic_hint по умолчанию"
+                        )
+                text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
 
             if rubric["key"] == "utro_privet":
                 holiday = get_holiday_for_date(now.date(), holidays)
@@ -491,14 +602,11 @@ def main():
 
         attachments = []
         try:
-            keywords = get_photo_keywords(rubric, weekday_index)
-            image_url = fetch_pexels_image(keywords)
-            if image_url:
-                token = upload_media_and_get_token(image_url)
-                if token:
-                    attachments.append({"type": "image", "payload": {"token": token}})
+            media_attachment = fetch_and_upload_media(rubric, weekday_index)
+            if media_attachment:
+                attachments.append(media_attachment)
         except Exception as e:
-            print(f"Рубрика {rubric['key']}: ошибка при подготовке фото — {e}. Публикую без него.")
+            print(f"Рубрика {rubric['key']}: ошибка при подготовке медиа — {e}. Публикую без него.")
 
         button = build_link_button_attachment(rubric.get("site_link"))
         if button:
