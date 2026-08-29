@@ -31,6 +31,10 @@ YANDEX_FOLDER_ID = os.environ["YANDEX_FOLDER_ID"]
 RUBRICS_FILE = "rubrics.json"
 HOLIDAYS_FILE = "max_women_holidays.json"
 STATE_FILE = "posted_rubrics.json"
+TAROT_FILE = "tarot_deck_78.json"
+NUMEROLOGY_FILE = "numerology.json"
+PALMISTRY_FILE = "palmistry.json"
+OMENS_FILE = "omens.json"
 TIMEZONE = "Europe/Moscow"
 API_BASE = "https://platform-api2.max.ru"
 YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
@@ -98,6 +102,13 @@ def load_rubrics():
 
 def load_holidays() -> dict:
     with open(HOLIDAYS_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_json_file(path: str):
+    """Общий загрузчик для новых справочников рубрики «Эзотерика»
+    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json)."""
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -194,6 +205,83 @@ def get_holiday_for_date(target_date, holidays: dict):
 
 def format_holiday_paragraph(holiday: dict) -> str:
     return f"\n\n🌷 **А ещё сегодня — {holiday['name']}!**\n{holiday['text']}"
+
+
+def calculate_numerology_number(target_date) -> int:
+    """Число дня по методу Пифагора — считается из сегодняшней календарной даты,
+    а НЕ из даты рождения читательницы (в MAX нет формы ввода)."""
+    digits = [int(ch) for ch in target_date.strftime("%d%m%Y")]
+    total = sum(digits)
+    while total > 9 and total not in (11, 22, 33):
+        total = sum(int(ch) for ch in str(total))
+    return total
+
+
+def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
+    """Рубрика «Эзотерика и Таро» ротирует источник по дням недели:
+    пн/пт — карта Таро, вт/сб — число дня (нумерология), ср — линия ладони
+    (хиромантия), чт/вс — народная примета. Реальный факт из JSON подставляется
+    в промпт, чтобы YandexGPT раскрывал его, а не выдумывал что-то от себя."""
+    rng = random.Random(f"{target_date.isoformat()}-ezoterika")
+
+    if weekday_index in (0, 4):  # понедельник, пятница — Таро
+        deck = load_json_file(TAROT_FILE)
+        all_cards = list(deck["major_arcana"])
+        for suit_cards in deck["minor_arcana"].values():
+            all_cards.extend(suit_cards)
+        card = rng.choice(all_cards)
+        position = rng.choice(["upright", "reversed"])
+        position_ru = "прямое положение" if position == "upright" else "перевёрнутое положение"
+        sphere = card[position]
+        return (
+            "Разбери карту дня Таро для читательниц женского паблика. Строго используй "
+            "только перечисленные ниже факты, не меняй название карты и положение, "
+            "не выдумывай другие значения:\n"
+            f"Карта: {card['name']} ({position_ru}).\n"
+            f"Общее значение: {sphere['general']}.\n"
+            f"В любви: {sphere['love']}.\n"
+            f"В карьере: {sphere['career']}.\n"
+            f"В деньгах: {sphere['money']}."
+        )
+
+    if weekday_index in (1, 5):  # вторник, суббота — нумерология
+        numerology = load_json_file(NUMEROLOGY_FILE)
+        number = calculate_numerology_number(target_date)
+        entry = numerology["numbers"][str(number)]
+        return (
+            "Разбери «число дня» в нумерологии — это универсальное число сегодняшнего "
+            "дня (рассчитано из календарной даты), а НЕ число по дате рождения конкретного "
+            "человека, поэтому не проси и не упоминай дату рождения читательниц. Строго "
+            "используй только факты ниже, не выдумывай других значений:\n"
+            f"Число дня: {number} — «{entry['title']}».\n"
+            f"{entry['text']}\n"
+            f"В любви: {entry['love']}\n"
+            f"В карьере: {entry['career']}"
+        )
+
+    if weekday_index == 2:  # среда — хиромантия
+        palmistry = load_json_file(PALMISTRY_FILE)
+        line_keys = list(palmistry["lines"].keys())
+        line_key = line_keys[target_date.isocalendar()[1] % len(line_keys)]
+        line = palmistry["lines"][line_key]
+        return (
+            "Расскажи читательницам про эту линию ладони в хиромантии простым языком, "
+            "объясни, как её найти на своей руке. Строго используй только факты ниже, "
+            "не выдумывай другие линии и толкования:\n"
+            f"Линия: {line['name']}.\n"
+            f"Расположение: {line['location']}.\n"
+            f"Значение: {line['meaning_general']}"
+        )
+
+    # четверг, воскресенье — народные приметы
+    omens = load_json_file(OMENS_FILE)
+    category = rng.choice(list(omens["categories"].values()))
+    item = rng.choice(category["items"])
+    return (
+        "Расскажи читательницам про эту народную примету в лёгком, развлекательном тоне. "
+        "Строго используй только факт ниже, не выдумывай других примет:\n"
+        f"Примета: «{item['sign']}» — {item['meaning']}"
+    )
 
 
 def load_state() -> set:
@@ -363,6 +451,13 @@ def main():
         if record_key in state:
             continue
 
+        # Рубрики с полем "days" публикуются только в указанные дни недели
+        # (0 = понедельник ... 6 = воскресенье). Рубрики без этого поля —
+        # ежедневные "якоря", их поведение не меняется.
+        allowed_days = rubric.get("days")
+        if allowed_days is not None and weekday_index not in allowed_days:
+            continue
+
         scheduled_h, scheduled_m = (int(p) for p in rubric["time"].split(":"))
         scheduled_dt = now.replace(hour=scheduled_h, minute=scheduled_m, second=0, microsecond=0)
 
@@ -372,7 +467,18 @@ def main():
         print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
 
         try:
-            text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
+            active_rubric = rubric
+            if rubric["key"] == "ezoterika":
+                try:
+                    ezoterika_topic = get_ezoterika_topic_hint(weekday_index, now.date())
+                    active_rubric = {**rubric, "topic_hint": ezoterika_topic}
+                except Exception as e:
+                    print(
+                        f"Рубрика ezoterika: не удалось подготовить факт из JSON ({e}), "
+                        "публикую с topic_hint по умолчанию"
+                    )
+
+            text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
 
             if rubric["key"] == "utro_privet":
                 holiday = get_holiday_for_date(now.date(), holidays)
