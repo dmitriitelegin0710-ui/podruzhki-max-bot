@@ -12,9 +12,15 @@ HEADERS = {
 }
 
 QUERIES = [
-    '"шоу-бизнес" sourcelang:russian',
-    "знаменитости sourcelang:russian",
-    'звезды "шоу-бизнеса" sourcelang:russian',
+    # ВАЖНО: слова поиска ищутся GDELT в англоязычном МАШИННОМ ПЕРЕВОДЕ
+    # статьи, а не в оригинальном русском тексте — это официально
+    # задокументированное поведение DOC 2.0 API. sourcelang:russian при
+    # этом фильтрует именно по языку ОРИГИНАЛА источника. Поэтому ключевые
+    # слова здесь должны быть на английском, а sourcelang уже гарантирует,
+    # что вернутся только изначально русскоязычные статьи.
+    "celebrity sourcelang:russian",
+    "showbiz sourcelang:russian",
+    "(actress OR singer OR actor) sourcelang:russian",
 ]
 
 # Таймаут и паузы между повторными попытками увеличены — GDELT DOC API
