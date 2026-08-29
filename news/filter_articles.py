@@ -1,22 +1,14 @@
 import json
 import re
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 INPUT_FILE = Path("news/articles.json")
 OUTPUT_FILE = Path("news/filtered_articles.json")
 
 
-def is_russian_domain(url: str) -> bool:
-    """Оставляем только .ru-домены — sourcelang:russian в GDELT ловит
-    русскоязычные сайты по всему миру (.kz, .by, .com и т.п.), а не
-    только российские."""
-    domain = urlparse(url).netloc.lower()
-    return domain.endswith(".ru")
-
-
-# Слова и фразы, характерные для шоу-бизнеса.
+# Слова и фразы, характерные для шоу-бизнеса и интересные молодой аудитории:
+# актёры/актрисы/модели, блогеры/инфлюенсеры, сплетни/скандалы/интриги.
 ENTERTAINMENT_KEYWORDS = [
     # Общее
     "шоу-бизнес",
@@ -37,8 +29,37 @@ ENTERTAINMENT_KEYWORDS = [
     "телеведущ",
     "ведущ",
     "модель",
+    "манекенщиц",
     "режиссер",
     "продюсер",
+
+    # Блогеры / молодёжная среда — то, к чему стремимся по аудитории
+    "блогер",
+    "блогерш",
+    "тиктокер",
+    "тик-ток",
+    "инфлюенсер",
+    "стример",
+    "стримерш",
+    "youtube-звезда",
+    "реалити-шоу",
+    "реалити шоу",
+
+    # Сплетни / скандалы / интриги — приоритетная тема
+    "скандал",
+    "сплетн",
+    "интриг",
+    "слух",
+    "измен",
+    "разоблач",
+    "компромат",
+    "уличил",
+    "поймали на",
+    "жестко ответил",
+    "жёстко ответил",
+    "разборк",
+    "скандальн",
+    "конфликт со звезд",
 
     # Музыка
     "песн",
@@ -49,7 +70,6 @@ ENTERTAINMENT_KEYWORDS = [
     "тур",
     "гастрол",
     "музык",
-    "премьера песни",
     "новый сингл",
 
     # Кино и ТВ
@@ -80,17 +100,16 @@ ENTERTAINMENT_KEYWORDS = [
     "ребён",
     "дочь",
     "сын",
-    "семь",
     "возлюблен",
     "бойфренд",
     "муж",
     "жена",
 
-    # Социальные сети / внешний вид
+    # Соцсети / внешний вид
     "instagram",
     "инстаграм",
+    "тикток",
     "соцсет",
-    "социальн сет",
     "фотографи",
     "фото",
     "образ",
@@ -100,12 +119,55 @@ ENTERTAINMENT_KEYWORDS = [
 ]
 
 
-# Темы, которые часто дают ложные совпадения.
-# ВАЖНО: эти слова ищутся как ЦЕЛЫЕ СЛОВА (с границей \b слева), а не как
-# произвольная подстрока — иначе, например, "акци" ложно находится внутри
-# "реакция", "банк" — внутри "банкет", "фронт" — внутри "конфронтация",
-# "арм" — внутри "Армани". Раньше это могло отбраковывать совершенно
-# нормальные новости о звёздах из-за одного случайного слова в заголовке.
+# Признаки "возрастного"/наследного контента — не блокируем жёстко (иногда
+# это реально актуальный мировой инфоповод), но используем, чтобы понижать
+# такие статьи в очереди публикации в пользу более молодых и свежих тем.
+LEGACY_KEYWORDS = [
+    "советск",
+    "народный артист",
+    "заслуженный артист",
+    "легенда сцены",
+    "легенда советского",
+    "юбилей",
+    "ветеран сцены",
+    "лет исполнилось",
+]
+
+
+# ЖЁСТКИЕ исключения — если совпало, статья отбрасывается ВСЕГДА,
+# даже если в заголовке есть слово "актёр"/"певец"/"звезда" и т.п.
+# Раньше именно это было багом: смерть/война проходили фильтр, потому что
+# в заголовке попутно упоминался артист.
+HARD_EXCLUDE_KEYWORDS = [
+    # Смерть / похороны
+    "умер",
+    "умерла",
+    "скончал",
+    "не стало",
+    "похорон",
+    "прощание с",
+    "траур",
+    "погиб",
+    "гибель",
+    "мертв",
+
+    # Война / military
+    "взрыв",
+    "обстрел",
+    "атак",
+    "бпла",
+    "фронт",
+    "военн",
+    "войн",
+    "оккупац",
+    "снаряд",
+    "ракетн удар",
+]
+
+
+# Темы, которые часто дают ложные совпадения (политика, спорт, техника и т.п.).
+# Эти слова ищутся как ЦЕЛЫЕ СЛОВА (граница \b слева), а не подстрокой —
+# иначе, например, "акци" ложно находится внутри "реакция".
 EXCLUDED_KEYWORDS = [
     # Политика
     "президент",
@@ -118,15 +180,8 @@ EXCLUDED_KEYWORDS = [
     "политик",
     "партия",
     "санкци",
-    "войн",
-    "военн",
-    "армия",
-    "фронт",
 
-    # Криминал / происшествия
-    "убийств",
-    "убил",
-    "убита",
+    # Криминал (не смертельный)
     "полици",
     "арестован",
     "задержан",
@@ -178,6 +233,8 @@ EXCLUDED_KEYWORDS = [
     "землетряс",
     "ураган",
     "пожар",
+    "выставка",
+    "живопис",
 ]
 
 
@@ -188,8 +245,6 @@ def normalize(text):
 
     text = text.lower()
     text = text.replace("ё", "е")
-
-    # Убираем лишние пробелы.
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
@@ -197,24 +252,38 @@ def normalize(text):
 
 def _compile_word_patterns(keywords):
     """Компилирует ключевые слова в regex с границей слова слева (\\b),
-    чтобы "акци" не находилось внутри "реакция" и т.п. Слова из списков —
-    это, как правило, корни/начала слов ("развод", "певиц"), поэтому
-    границу справа не ставим специально: она бы сломала совпадения вроде
-    "певица" при ключе "певиц"."""
+    чтобы "акци" не находилось внутри "реакция" и т.п."""
     return [re.compile(r"\b" + re.escape(keyword)) for keyword in keywords]
 
 
 ENTERTAINMENT_PATTERNS = _compile_word_patterns(ENTERTAINMENT_KEYWORDS)
 EXCLUDED_PATTERNS = _compile_word_patterns(EXCLUDED_KEYWORDS)
+HARD_EXCLUDE_PATTERNS = _compile_word_patterns(HARD_EXCLUDE_KEYWORDS)
+LEGACY_PATTERNS = _compile_word_patterns(LEGACY_KEYWORDS)
+
+# Слова, которые явно указывают на молодую/актуальную сплетню-тему —
+# используются только для приоритизации, не для отбора.
+YOUNG_GOSSIP_KEYWORDS = [
+    "блогер",
+    "тиктокер",
+    "инфлюенсер",
+    "стример",
+    "скандал",
+    "сплетн",
+    "интриг",
+    "слух",
+    "измен",
+    "разоблач",
+    "компромат",
+]
+YOUNG_GOSSIP_PATTERNS = _compile_word_patterns(YOUNG_GOSSIP_KEYWORDS)
 
 
 def contains_any(text, patterns):
-    """Проверяет наличие хотя бы одного ключевого слова (по границе слова)."""
     return any(pattern.search(text) for pattern in patterns)
 
 
 def count_matches(text, patterns):
-    """Считает количество совпавших тематических ключей (по границе слова)."""
     return sum(1 for pattern in patterns if pattern.search(text))
 
 
@@ -241,52 +310,44 @@ def looks_like_comment_rules(text):
 def is_good_article(article):
     """
     Возвращает True, если материал похож на полноценную
-    новость шоу-бизнеса.
+    новость шоу-бизнеса, подходящую для молодой аудитории.
     """
-
-    if not is_russian_domain(article.get("url", "")):
-        return False
 
     title = normalize(article.get("title", ""))
     text = normalize(article.get("text", ""))
 
-    # Заголовок и текст должны существовать.
     if not title:
         return False
 
     if len(text) < 300:
         return False
 
-    # Если вместо статьи скачались правила/служебная страница.
     if looks_like_comment_rules(text):
         return False
 
-    # Слишком маленький текст относительно огромной страницы.
     if len(text.split()) < 50:
         return False
 
-    # Проверяем заголовок отдельно.
-    title_entertainment = contains_any(title, ENTERTAINMENT_PATTERNS)
+    # ЖЁСТКИЙ фильтр — смерть/похороны/война отбрасываются ВСЕГДА,
+    # независимо от того, есть ли в заголовке "актёр"/"звезда" и т.п.
+    if contains_any(title, HARD_EXCLUDE_PATTERNS):
+        return False
 
-    # Основной текст.
+    if count_matches(text, HARD_EXCLUDE_PATTERNS) >= 2:
+        return False
+
+    title_entertainment = contains_any(title, ENTERTAINMENT_PATTERNS)
     text_entertainment_count = count_matches(text, ENTERTAINMENT_PATTERNS)
 
-    # Исключающие темы.
     title_excluded = contains_any(title, EXCLUDED_PATTERNS)
     text_excluded_count = count_matches(text, EXCLUDED_PATTERNS)
 
-    # Если в заголовке явно политика/спорт/etc. —
-    # материал не подходит.
     if title_excluded and not title_entertainment:
         return False
 
-    # Если в тексте слишком много признаков посторонней темы.
     if text_excluded_count >= 4 and not title_entertainment:
         return False
 
-    # Хороший вариант:
-    # 1. развлекательное слово есть в заголовке;
-    # 2. либо есть несколько признаков шоу-бизнеса в тексте.
     if title_entertainment:
         return True
 
@@ -294,6 +355,26 @@ def is_good_article(article):
         return True
 
     return False
+
+
+def priority_score(article):
+    """
+    Чем выше число — тем раньше статья должна публиковаться.
+    Молодёжные темы (блогеры/сплетни/скандалы) — в приоритете,
+    "возрастной"/наследный контент (юбилеи, советские легенды) — в конец
+    очереди, но не исключается совсем.
+    """
+    title = normalize(article.get("title", ""))
+    text = normalize(article.get("text", ""))
+
+    score = 0
+    score += 3 * count_matches(title, YOUNG_GOSSIP_PATTERNS)
+    score += 1 * count_matches(text, YOUNG_GOSSIP_PATTERNS)
+
+    if contains_any(title, LEGACY_PATTERNS) or contains_any(text, LEGACY_PATTERNS):
+        score -= 5
+
+    return score
 
 
 def make_clean_article(article):
@@ -318,10 +399,7 @@ def main():
             f"Не найден входной файл: {INPUT_FILE}"
         )
 
-    with INPUT_FILE.open(
-        "r",
-        encoding="utf-8"
-    ) as f:
+    with INPUT_FILE.open("r", encoding="utf-8") as f:
         articles = json.load(f)
 
     if not isinstance(articles, list):
@@ -340,11 +418,8 @@ def main():
     for article in articles:
         url = article.get("url", "").strip()
 
-        # Убираем дубли.
         if url and url in seen_urls:
-            rejected.append(
-                (article.get("title", ""), "дубликат")
-            )
+            rejected.append((article.get("title", ""), "дубликат"))
             continue
 
         if url:
@@ -352,31 +427,26 @@ def main():
 
         if is_good_article(article):
             clean_article = make_clean_article(article)
+            clean_article["_priority"] = priority_score(article)
             filtered.append(clean_article)
 
             print("✓ ОСТАВЛЕНО:")
-            print(" ", clean_article["title"])
+            print(" ", clean_article["title"], f"(приоритет: {clean_article['_priority']})")
             print()
         else:
-            rejected.append(
-                (article.get("title", ""), "не прошел фильтр")
-            )
+            rejected.append((article.get("title", ""), "не прошел фильтр"))
 
-    OUTPUT_FILE.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    # Сначала — самые "молодёжные"/скандальные темы, потом остальное;
+    # "возрастной" контент уходит в конец, но не теряется совсем.
+    filtered.sort(key=lambda a: a["_priority"], reverse=True)
 
-    with OUTPUT_FILE.open(
-        "w",
-        encoding="utf-8"
-    ) as f:
-        json.dump(
-            filtered,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
+    for article in filtered:
+        del article["_priority"]
+
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    with OUTPUT_FILE.open("w", encoding="utf-8") as f:
+        json.dump(filtered, f, ensure_ascii=False, indent=2)
 
     print("=" * 60)
     print("ГОТОВО")
