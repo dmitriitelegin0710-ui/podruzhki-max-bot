@@ -17,6 +17,13 @@ QUERIES = [
     "звезды шоу-бизнеса sourcelang:russian",
 ]
 
+# Таймаут и паузы между повторными попытками увеличены — GDELT DOC API
+# нередко подвисает под нагрузкой (30 сек не всегда хватает) и иногда
+# отдаёт HTTP 200 с пустым/битым телом вместо JSON. Логика ниже переживает
+# оба этих случая и не молча возвращает [] после первого же сбоя.
+REQUEST_TIMEOUT = 45
+RETRY_BACKOFFS = [15, 30, 60]  # секунды паузы перед каждой следующей попыткой
+
 
 def search_gdelt(query):
     params = {
@@ -28,34 +35,70 @@ def search_gdelt(query):
         "sort": "datedesc",
     }
 
-    for attempt in range(1, 3):
-        print(f"GDELT: {query} — попытка {attempt}")
+    attempts = len(RETRY_BACKOFFS)
+
+    for attempt in range(1, attempts + 1):
+        print(f"GDELT: {query} — попытка {attempt}/{attempts}")
 
         try:
             response = requests.get(
                 GDELT_URL,
                 params=params,
                 headers=HEADERS,
-                timeout=30
+                timeout=REQUEST_TIMEOUT,
             )
 
             print("HTTP:", response.status_code)
 
             if response.status_code == 429:
-                print("429 — ждём 45 секунд...")
-                time.sleep(45)
+                wait = RETRY_BACKOFFS[attempt - 1]
+                print(f"429 — ждём {wait} секунд...")
+                time.sleep(wait)
                 continue
 
             response.raise_for_status()
 
+            body = response.text.strip()
+            if not body:
+                print("Пустой ответ от GDELT (HTTP 200, но без тела).")
+                if attempt < attempts:
+                    wait = RETRY_BACKOFFS[attempt - 1]
+                    print(f"Повтор через {wait} секунд...")
+                    time.sleep(wait)
+                continue
+
             return response.json().get("articles", [])
+
+        except requests.exceptions.Timeout:
+            print(f"Таймаут запроса (>{REQUEST_TIMEOUT} сек).")
+            if attempt < attempts:
+                wait = RETRY_BACKOFFS[attempt - 1]
+                print(f"Повтор через {wait} секунд...")
+                time.sleep(wait)
+
+        except requests.exceptions.ConnectionError as e:
+            print("Ошибка соединения:", e)
+            if attempt < attempts:
+                wait = RETRY_BACKOFFS[attempt - 1]
+                print(f"Повтор через {wait} секунд...")
+                time.sleep(wait)
+
+        except json.JSONDecodeError:
+            snippet = response.text[:200] if "response" in locals() else ""
+            print(f"Не удалось распарсить JSON. Начало ответа: {snippet!r}")
+            if attempt < attempts:
+                wait = RETRY_BACKOFFS[attempt - 1]
+                print(f"Повтор через {wait} секунд...")
+                time.sleep(wait)
 
         except Exception as e:
             print("Ошибка:", e)
+            if attempt < attempts:
+                wait = RETRY_BACKOFFS[attempt - 1]
+                print(f"Повтор через {wait} секунд...")
+                time.sleep(wait)
 
-            if attempt < 2:
-                time.sleep(15)
-
+    print(f"GDELT: '{query}' — не удалось получить данные после всех попыток.")
     return []
 
 
