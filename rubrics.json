@@ -187,6 +187,15 @@
       ]
     },
     {
+      "key": "test_dnya",
+      "time": "19:00",
+      "emoji": "🧠",
+      "title": "Тест дня",
+      "photo_keywords": [
+        "woman quiz test thinking cozy"
+      ]
+    },
+    {
       "key": "narodnaya_mudrost",
       "time": "18:30",
       "emoji": "🍃",
