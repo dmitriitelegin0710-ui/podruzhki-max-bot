@@ -12,9 +12,9 @@ HEADERS = {
 }
 
 QUERIES = [
-    "шоу-бизнес sourcelang:russian",
+    '"шоу-бизнес" sourcelang:russian',
     "знаменитости sourcelang:russian",
-    "звезды шоу-бизнеса sourcelang:russian",
+    'звезды "шоу-бизнеса" sourcelang:russian',
 ]
 
 # Таймаут и паузы между повторными попытками увеличены — GDELT DOC API
