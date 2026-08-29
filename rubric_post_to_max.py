@@ -5,6 +5,11 @@
 Картинка — через Pexels Photos API.
 Отправка в MAX — тот же API, что и раньше.
 
+Рубрика "Тест дня" (test_dnya) — исключение: текст берётся не от YandexGPT,
+а напрямую из miniapp/tests/test-001.md (тот же файл, что парсит app.js в
+mini app), чтобы название и хук теста в канале и в mini app совпадали
+всегда, без ручного дублирования данных.
+
 Запускается по расписанию через GitHub Actions (см. rubric_post.yml),
 раз в 30 минут проверяет, не пора ли публиковать очередную рубрику.
 
@@ -36,6 +41,20 @@ NUMEROLOGY_FILE = "numerology.json"
 PALMISTRY_FILE = "palmistry.json"
 OMENS_FILE = "omens.json"
 WOMEN_STORIES_FILE = "women_success_stories.json"
+
+# --- Рубрика "Тест дня" ---
+# Путь указан от корня репозитория podruzhki-max-bot, т.к. GitHub Actions
+# запускает скрипт из корня репозитория (там же лежит rubrics.json и т.д.).
+TESTS_MD_FILE = "miniapp/tests/test-001.md"
+TOTAL_TESTS = 24
+MINIAPP_BASE_URL = "https://podruzhki.online/max/"
+# Ссылки на сайт со всеми тестами пока нет (там ещё не обновлено под общий
+# список) — поэтому вместо кликабельной кнопки в пост добавляется обычная
+# текстовая строка-заглушка. Когда появится реальная ссылка, замените
+# использование SITE_TESTS_PLACEHOLDER_LINE на build_link_button_attachment(...)
+# внутри build_test_dnya_attachments().
+SITE_TESTS_PLACEHOLDER_LINE = "📚 Все тесты — совсем скоро здесь появится ссылка на сайт"
+
 TIMEZONE = "Europe/Moscow"
 API_BASE = "https://platform-api2.max.ru"
 YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
@@ -314,6 +333,75 @@ def build_istoriya_zhenshiny_post(target_date) -> str:
     )
 
 
+def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
+    """Вытаскивает заголовок и хук каждого из 24 тестов прямо из markdown-файла
+    miniapp/tests/test-001.md — того же самого файла, который на клиенте парсит
+    app.js (функция parseAllTests). Данные не дублируются в отдельный JSON,
+    поэтому заголовок теста в посте канала и в mini app всегда совпадают."""
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+
+    # Каждый тест в файле начинается со строки вида "# 4. Название теста"
+    blocks = re.split(r"(?=^#\s+\d+\.\s+)", content, flags=re.MULTILINE)
+
+    tests = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+
+        title_match = re.match(r"^#\s+\d+\.\s+(.+)$", block, re.MULTILINE)
+        if not title_match:
+            continue
+
+        hook_match = re.search(r"^Хук:\s*(.+)$", block, re.MULTILINE)
+        tests.append({
+            "title": title_match.group(1).strip(),
+            "hook": hook_match.group(1).strip() if hook_match else "",
+        })
+
+    if len(tests) != TOTAL_TESTS:
+        raise ValueError(
+            f"Ожидалось {TOTAL_TESTS} теста(ов) в {path}, найдено {len(tests)}. "
+            "Публикацию пропускаю, чтобы не отправить пустой/неверный пост."
+        )
+    return tests
+
+
+def build_test_dnya_post(target_date):
+    """Тест дня — по той же схеме, что и «История сильной женщины»: полный
+    проход по всем 24 тестам без повторов, потом заново. test_number (1..24)
+    — это именно тот номер, который app.js ожидает в параметре ?test=.
+    Возвращает (текст_поста, test_number)."""
+    tests = load_tests_from_md()
+    index = target_date.toordinal() % len(tests)
+    test = tests[index]
+    test_number = index + 1  # app.js использует 1-based номер теста
+
+    text = f"🧠 **Тест дня: {test['title']}**"
+    if test["hook"]:
+        text += f"\n\n{test['hook']}"
+    return text, test_number
+
+
+def build_test_dnya_attachments(test_number: int):
+    """Кнопки под постом рубрики «Тест дня»:
+      - «Пройти этот тест» — рабочая ссылка на конкретный тест в mini app;
+      - блок про сайт — временно ТЕКСТ-заглушка (не кнопка), потому что
+        актуальной ссылки на список тестов на сайте пока нет. Как только
+        ссылка появится, замените вызов ниже на:
+            build_link_button_attachment(SITE_TESTS_URL, "Все тесты на сайте")
+        и добавьте эту кнопку вторым элементом в тот же список [[ ... ]],
+        чтобы обе кнопки шли в один ряд.
+    """
+    return [{
+        "type": "inline_keyboard",
+        "payload": {"buttons": [[
+            {"type": "link", "text": "Пройти этот тест", "url": f"{MINIAPP_BASE_URL}?test={test_number}"},
+        ]]},
+    }]
+
+
 def load_state() -> set:
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, encoding="utf-8") as f:
@@ -575,8 +663,12 @@ def main():
 
         print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
 
+        test_number = None  # используется только для test_dnya, для кнопок ниже
+
         try:
-            if rubric["key"] == "istoriya_zhenshiny":
+            if rubric["key"] == "test_dnya":
+                text, test_number = build_test_dnya_post(now.date())
+            elif rubric["key"] == "istoriya_zhenshiny":
                 text = build_istoriya_zhenshiny_post(now.date())
             else:
                 active_rubric = rubric
@@ -608,9 +700,15 @@ def main():
         except Exception as e:
             print(f"Рубрика {rubric['key']}: ошибка при подготовке медиа — {e}. Публикую без него.")
 
-        button = build_link_button_attachment(rubric.get("site_link"))
-        if button:
-            attachments.append(button)
+        if rubric["key"] == "test_dnya":
+            # Пока нет ссылки на сайт со списком тестов — добавляем текстовую
+            # заглушку прямо в текст поста (не кнопку, некликабельно).
+            text += f"\n\n{SITE_TESTS_PLACEHOLDER_LINE}"
+            attachments.extend(build_test_dnya_attachments(test_number))
+        else:
+            button = build_link_button_attachment(rubric.get("site_link"))
+            if button:
+                attachments.append(button)
 
         response = send_message(text, attachments or None)
         print(f"Рубрика {rubric['key']}: статус {response.status_code}, ответ: {response.text[:200]}")
