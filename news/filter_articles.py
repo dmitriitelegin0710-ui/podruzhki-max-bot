@@ -101,6 +101,11 @@ ENTERTAINMENT_KEYWORDS = [
 
 
 # Темы, которые часто дают ложные совпадения.
+# ВАЖНО: эти слова ищутся как ЦЕЛЫЕ СЛОВА (с границей \b слева), а не как
+# произвольная подстрока — иначе, например, "акци" ложно находится внутри
+# "реакция", "банк" — внутри "банкет", "фронт" — внутри "конфронтация",
+# "арм" — внутри "Армани". Раньше это могло отбраковывать совершенно
+# нормальные новости о звёздах из-за одного случайного слова в заголовке.
 EXCLUDED_KEYWORDS = [
     # Политика
     "президент",
@@ -108,13 +113,14 @@ EXCLUDED_KEYWORDS = [
     "министр",
     "депутат",
     "парламент",
-    "выбор",
+    "выборы президент",
+    "выборы в",
     "политик",
     "партия",
     "санкци",
     "войн",
     "военн",
-    "арм",
+    "армия",
     "фронт",
 
     # Криминал / происшествия
@@ -122,7 +128,7 @@ EXCLUDED_KEYWORDS = [
     "убил",
     "убита",
     "полици",
-    "суд арест",
+    "арестован",
     "задержан",
     "преступлен",
 
@@ -159,8 +165,9 @@ EXCLUDED_KEYWORDS = [
     "квартир",
     "ипотек",
     "рынок жилья",
-    "акци",
-    "бирж",
+    "акция",
+    "акции",
+    "биржа",
     "инвестиц",
     "банк",
     "кредит",
@@ -188,14 +195,27 @@ def normalize(text):
     return text.strip()
 
 
-def contains_any(text, keywords):
-    """Проверяет наличие хотя бы одного ключевого слова."""
-    return any(keyword in text for keyword in keywords)
+def _compile_word_patterns(keywords):
+    """Компилирует ключевые слова в regex с границей слова слева (\\b),
+    чтобы "акци" не находилось внутри "реакция" и т.п. Слова из списков —
+    это, как правило, корни/начала слов ("развод", "певиц"), поэтому
+    границу справа не ставим специально: она бы сломала совпадения вроде
+    "певица" при ключе "певиц"."""
+    return [re.compile(r"\b" + re.escape(keyword)) for keyword in keywords]
 
 
-def count_matches(text, keywords):
-    """Считает количество совпавших тематических ключей."""
-    return sum(1 for keyword in keywords if keyword in text)
+ENTERTAINMENT_PATTERNS = _compile_word_patterns(ENTERTAINMENT_KEYWORDS)
+EXCLUDED_PATTERNS = _compile_word_patterns(EXCLUDED_KEYWORDS)
+
+
+def contains_any(text, patterns):
+    """Проверяет наличие хотя бы одного ключевого слова (по границе слова)."""
+    return any(pattern.search(text) for pattern in patterns)
+
+
+def count_matches(text, patterns):
+    """Считает количество совпавших тематических ключей (по границе слова)."""
+    return sum(1 for pattern in patterns if pattern.search(text))
 
 
 def looks_like_comment_rules(text):
@@ -215,7 +235,7 @@ def looks_like_comment_rules(text):
         "политика конфиденциальности",
     ]
 
-    return contains_any(text, patterns)
+    return any(p in text for p in patterns)
 
 
 def is_good_article(article):
@@ -229,7 +249,6 @@ def is_good_article(article):
 
     title = normalize(article.get("title", ""))
     text = normalize(article.get("text", ""))
-    source = normalize(article.get("source", ""))
 
     # Заголовок и текст должны существовать.
     if not title:
@@ -247,27 +266,14 @@ def is_good_article(article):
         return False
 
     # Проверяем заголовок отдельно.
-    title_entertainment = contains_any(
-        title,
-        ENTERTAINMENT_KEYWORDS
-    )
+    title_entertainment = contains_any(title, ENTERTAINMENT_PATTERNS)
 
     # Основной текст.
-    text_entertainment_count = count_matches(
-        text,
-        ENTERTAINMENT_KEYWORDS
-    )
+    text_entertainment_count = count_matches(text, ENTERTAINMENT_PATTERNS)
 
     # Исключающие темы.
-    title_excluded = contains_any(
-        title,
-        EXCLUDED_KEYWORDS
-    )
-
-    text_excluded_count = count_matches(
-        text,
-        EXCLUDED_KEYWORDS
-    )
+    title_excluded = contains_any(title, EXCLUDED_PATTERNS)
+    text_excluded_count = count_matches(text, EXCLUDED_PATTERNS)
 
     # Если в заголовке явно политика/спорт/etc. —
     # материал не подходит.
