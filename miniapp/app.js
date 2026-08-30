@@ -148,19 +148,32 @@ function hasWebApp() {
   return typeof window.WebApp !== "undefined" && window.WebApp !== null;
 }
 
+// Сообщаем клиенту MAX, что экран готов (убирает "скелетон" загрузки).
+// Безопасно вызывается один раз при старте, если WebApp доступен.
+if (hasWebApp() && typeof window.WebApp.ready === "function") {
+  try { window.WebApp.ready(); } catch (e) { /* игнорируем — не критично */ }
+}
+
 window.returnToChannel = function() {
   try {
     if (hasWebApp()) {
-      // 1) Предпочтительный способ — открыть диплинк max.ru внутри самого MAX.
+      // 1) Основной способ: мини-приложение открыто ПОВЕРХ экрана канала
+      //    (пользователь пришёл по ссылке из поста в канале). Простое
+      //    закрытие мини-аппа возвращает его ровно туда, откуда он был
+      //    открыт, то есть на канал. Это надёжнее, чем пытаться открыть
+      //    диплинк на канал изнутри уже открытого мини-аппа — такой
+      //    "самовызов" на некоторых платформах просто блокируется на
+      //    уровне ОС/WebView и внешне выглядит как "кнопка не работает".
+      if (typeof window.WebApp.close === "function") {
+        window.WebApp.close();
+        return;
+      }
+      // 2) Резерв: открыть диплинк max.ru внутри самого MAX.
       if (typeof window.WebApp.openMaxLink === "function") {
         window.WebApp.openMaxLink(CHANNEL_URL);
         return;
       }
-      // 2) Если openMaxLink недоступен в этой версии/платформе клиента —
-      //    открываем ту же ссылку через штатный "внешний" метод openLink.
-      //    Раньше здесь сразу шёл location.href, из-за чего внутри WebView
-      //    мини-приложения переход просто блокировался и кнопка казалась
-      //    нерабочей.
+      // 3) Резерв: открыть ту же ссылку через штатный "внешний" метод.
       if (typeof window.WebApp.openLink === "function") {
         window.WebApp.openLink(CHANNEL_URL);
         return;
@@ -170,7 +183,7 @@ window.returnToChannel = function() {
     console.error("returnToChannel: ошибка при вызове MAX Bridge", e);
   }
 
-  // 3) Финальный fallback — обычный переход по ссылке.
+  // 4) Финальный fallback — обычный переход по ссылке.
   //    Актуален только если страница открыта вне MAX (прямой браузер).
   window.location.href = CHANNEL_URL;
 };
@@ -215,7 +228,7 @@ function renderStart() {
 
       <div class="start-actions">
         <button class="primary" onclick="startQuiz()">Пройти тест</button>
-        <button class="secondary" onclick="nextTest()">Следующий тест</button>
+        <button class="secondary" onclick="nextTest()">Следующий</button>
         <button class="secondary" onclick="returnToChannel()">Вернуться на канал</button>
       </div>
     </section>
@@ -277,7 +290,7 @@ function renderQuestion() {
 
       <div class="quiz-actions">
         <button class="secondary" onclick="goToFirstTest()">Все тесты</button>
-        <button class="secondary" onclick="nextTest()">Следующий тест</button>
+        <button class="secondary" onclick="nextTest()">Следующий</button>
         <button class="secondary" onclick="returnToChannel()">Вернуться в канал</button>
       </div>
     </section>
