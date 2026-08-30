@@ -397,7 +397,7 @@ def build_test_dnya_attachments(test_number: int):
     return [{
         "type": "inline_keyboard",
         "payload": {"buttons": [[
-            {"type": "link", "text": "Пройти этот тест", "url": f"{MINIAPP_BASE_URL}?test={test_number}"},
+            {"type": "link", "text": "Пройти этот и другие тесты 🧠", "url": f"{MINIAPP_BASE_URL}?test={test_number}"},
         ]]},
     }]
 
