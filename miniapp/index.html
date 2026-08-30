@@ -10,6 +10,11 @@
   <main id="app">
     <div class="loading">Загрузка теста…</div>
   </main>
+  <!-- MAX Bridge — даёт доступ к window.WebApp (шеринг, ссылки на канал и т.д.).
+       Если открыть страницу вне MAX (просто в браузере), скрипт всё равно
+       безопасно подключится, а app.js сам проверяет наличие window.WebApp
+       и использует резервные варианты (обычная ссылка / системный шеринг). -->
+  <script src="https://st.max.ru/js/max-web-app.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
