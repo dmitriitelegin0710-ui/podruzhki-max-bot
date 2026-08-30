@@ -1,12 +1,16 @@
 const DEFAULT_TEST = 1;
 const TOTAL_TESTS = 24;
-const SITE_BUTTON_TEXT = "Все тесты на сайте";
+
+// Ссылка на канал MAX — используется кнопкой "Вернуться на канал"
+// на стартовом экране теста и на экране результата.
+const CHANNEL_URL = "https://max.ru/channel_podruzhki";
 
 let tests = [];
 let testIndex = Math.max(0, Math.min(TOTAL_TESTS - 1, Number(new URLSearchParams(location.search).get("test") || DEFAULT_TEST) - 1));
 let quiz = null;
 let current = 0;
 let answers = [];
+let lastResult = null; // сохраняем последний показанный результат — нужен для шеринга
 
 const app = document.getElementById("app");
 
@@ -128,6 +132,51 @@ function parseAllTests(md) {
   return parsed;
 }
 
+// --- Интеграция с MAX Bridge (window.WebApp) ---
+// Обе функции ниже безопасно работают и без MAX Bridge (например, при
+// открытии mini app напрямую в обычном браузере для проверки) — тогда
+// используется обычный переход по ссылке / нативный шеринг браузера.
+
+function hasWebApp() {
+  return typeof window.WebApp !== "undefined" && window.WebApp !== null;
+}
+
+window.returnToChannel = function() {
+  if (hasWebApp() && typeof window.WebApp.openMaxLink === "function") {
+    window.WebApp.openMaxLink(CHANNEL_URL);
+  } else {
+    window.location.href = CHANNEL_URL;
+  }
+};
+
+window.shareResult = function() {
+  if (!quiz || !lastResult) return;
+
+  const resultTitle = lastResult.title || "";
+  const shareText = `Прошла тест «${quiz.title}» — мой результат: ${resultTitle}. Попробуй тоже! 🧠`;
+  const shareLink = `${location.origin}${location.pathname}?test=${testIndex + 1}`;
+
+  if (hasWebApp() && typeof window.WebApp.shareMaxContent === "function") {
+    window.WebApp.shareMaxContent({ text: shareText, link: shareLink });
+    return;
+  }
+
+  if (hasWebApp() && typeof window.WebApp.shareContent === "function") {
+    window.WebApp.shareContent({ text: shareText, link: shareLink });
+    return;
+  }
+
+  if (navigator.share) {
+    navigator.share({ text: shareText, url: shareLink }).catch(() => {});
+    return;
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(`${shareText} ${shareLink}`);
+    alert("Ссылка на тест и результат скопированы — вставьте в чат, чтобы поделиться!");
+  }
+};
+
 function renderStart() {
   quiz = tests[testIndex];
 
@@ -141,9 +190,7 @@ function renderStart() {
       <div class="start-actions">
         <button class="primary" onclick="startQuiz()">Пройти тест</button>
         <button class="secondary" onclick="nextTest()">Следующий тест</button>
-        <button class="secondary site-placeholder" disabled title="Кнопка-заглушка">
-          ${SITE_BUTTON_TEXT}
-        </button>
+        <button class="secondary" onclick="returnToChannel()">Вернуться на канал</button>
       </div>
     </section>
   `;
@@ -222,19 +269,19 @@ function showResult() {
     : winners[0];
 
   const result = quiz.results[resultKey];
+  lastResult = result || { title: resultKey, text: "" };
 
   app.innerHTML = `
     <section class="card result">
       <div class="badge">ТЕСТ ${testIndex + 1} ИЗ ${tests.length}</div>
       <div class="score">${max} из ${quiz.questions.length}</div>
-      <h1>${esc(result ? result.title : resultKey)}</h1>
-      <p>${esc(result ? result.text : "Результат определён по вашим ответам.")}</p>
+      <h1>${esc(lastResult.title)}</h1>
+      <p>${esc(lastResult.text || "Результат определён по вашим ответам.")}</p>
 
       <button class="primary" onclick="startQuiz()">Пройти ещё раз</button>
+      <button class="secondary" onclick="shareResult()">Поделиться результатом</button>
       <button class="secondary" onclick="nextTest()">Следующий тест</button>
-      <button class="secondary site-placeholder" disabled title="Кнопка-заглушка">
-        ${SITE_BUTTON_TEXT}
-      </button>
+      <button class="secondary" onclick="returnToChannel()">Вернуться на канал</button>
     </section>
   `;
 }
