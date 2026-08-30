@@ -47,7 +47,7 @@ WOMEN_STORIES_FILE = "women_success_stories.json"
 # запускает скрипт из корня репозитория (там же лежит rubrics.json и т.д.).
 TESTS_MD_FILE = "miniapp/tests/test-001.md"
 TOTAL_TESTS = 24
-MINIAPP_BASE_URL = "https://podruzhki.online/max/"
+MINIAPP_BASE_URL = "https://xn--d1aeghrfjy.online/max/"
 # Ссылки на сайт со всеми тестами пока нет (там ещё не обновлено под общий
 # список) — поэтому вместо кликабельной кнопки в пост добавляется обычная
 # текстовая строка-заглушка. Когда появится реальная ссылка, замените
