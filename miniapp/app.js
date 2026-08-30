@@ -6,7 +6,30 @@ const TOTAL_TESTS = 24;
 const CHANNEL_URL = "https://max.ru/channel_podruzhki";
 
 let tests = [];
-let testIndex = Math.max(0, Math.min(TOTAL_TESTS - 1, Number(new URLSearchParams(location.search).get("test") || DEFAULT_TEST) - 1));
+// Номер теста может прийти двумя способами:
+// 1) ?test=11 в URL — если сайт открыли напрямую как обычную ссылку
+//    (например, при тестировании в браузере).
+// 2) через start_param мини-приложения — если запуск произошёл по
+//    кнопке "open_app", привязанной к боту. Формат payload — "test11"
+//    (латиница/цифры/подчёркивание/дефис), поэтому вытаскиваем число
+//    из строки на случай такого формата.
+function resolveTestIndexFromStartParam() {
+  try {
+    if (typeof window.WebApp === "undefined" || !window.WebApp) return null;
+    const startParam =
+      (window.WebApp.initDataUnsafe && window.WebApp.initDataUnsafe.start_param) || null;
+    if (!startParam) return null;
+    const match = String(startParam).match(/(\d+)/);
+    if (!match) return null;
+    return Number(match[1]);
+  } catch (e) {
+    return null;
+  }
+}
+
+const startParamTest = resolveTestIndexFromStartParam();
+const requestedTest = startParamTest || Number(new URLSearchParams(location.search).get("test") || DEFAULT_TEST);
+let testIndex = Math.max(0, Math.min(TOTAL_TESTS - 1, requestedTest - 1));
 let quiz = null;
 let current = 0;
 let answers = [];
@@ -154,85 +177,140 @@ if (hasWebApp() && typeof window.WebApp.ready === "function") {
   try { window.WebApp.ready(); } catch (e) { /* игнорируем — не критично */ }
 }
 
-window.returnToChannel = function() {
+// handleReturnToChannel вызывается из onclick НАСТОЯЩЕЙ ссылки <a href="...">
+// (см. renderStart/renderQuestion/showResult). Такой подход надёжнее, чем
+// программная навигация через location.href: если бридж не сработал —
+// сработает обычный клик по ссылке, а его операционная система (Android/iOS)
+// умеет распознавать диплинки max.ru гораздо надёжнее, чем JS-редирект,
+// который многие встроенные WebView блокируют из соображений безопасности.
+//
+// Возвращает true, если нужно позволить браузеру перейти по обычной ссылке
+// (fallback), и false, если переход уже обработан через MAX Bridge.
+window.handleReturnToChannel = function(event) {
   try {
     if (hasWebApp()) {
-      // 1) Основной способ: мини-приложение открыто ПОВЕРХ экрана канала
-      //    (пользователь пришёл по ссылке из поста в канале). Простое
-      //    закрытие мини-аппа возвращает его ровно туда, откуда он был
-      //    открыт, то есть на канал. Это надёжнее, чем пытаться открыть
-      //    диплинк на канал изнутри уже открытого мини-аппа — такой
-      //    "самовызов" на некоторых платформах просто блокируется на
-      //    уровне ОС/WebView и внешне выглядит как "кнопка не работает".
+      // 1) Мини-приложение обычно открыто ПОВЕРХ экрана канала — простое
+      //    закрытие возвращает пользователя ровно туда, откуда он пришёл.
       if (typeof window.WebApp.close === "function") {
         window.WebApp.close();
-        return;
+        if (event) event.preventDefault();
+        return false;
       }
-      // 2) Резерв: открыть диплинк max.ru внутри самого MAX.
+      // 2) Резерв: диплинк max.ru внутри самого MAX.
       if (typeof window.WebApp.openMaxLink === "function") {
         window.WebApp.openMaxLink(CHANNEL_URL);
-        return;
-      }
-      // 3) Резерв: открыть ту же ссылку через штатный "внешний" метод.
-      if (typeof window.WebApp.openLink === "function") {
-        window.WebApp.openLink(CHANNEL_URL);
-        return;
+        if (event) event.preventDefault();
+        return false;
       }
     }
   } catch (e) {
     console.error("returnToChannel: ошибка при вызове MAX Bridge", e);
   }
 
-  // 4) Финальный fallback — обычный переход по ссылке.
-  //    Актуален только если страница открыта вне MAX (прямой браузер).
-  window.location.href = CHANNEL_URL;
+  // 3) Бридж недоступен/не сработал — пусть браузер сам обработает клик
+  //    по реальной ссылке <a href="https://max.ru/...">. Это сработает
+  //    даже там, где программная навигация была заблокирована.
+  return true;
 };
 
-window.shareResult = function() {
+window.shareResult = async function() {
   if (!quiz || !lastResult) return;
 
   const resultTitle = lastResult.title || "";
   const shareText = `Прошла тест «${quiz.title}» — мой результат: ${resultTitle}. Попробуй тоже! 🧠`;
   const shareLink = `${location.origin}${location.pathname}?test=${testIndex + 1}`;
 
-  if (hasWebApp() && typeof window.WebApp.shareMaxContent === "function") {
-    window.WebApp.shareMaxContent({ text: shareText, link: shareLink });
-    return;
+  try {
+    if (hasWebApp() && typeof window.WebApp.shareMaxContent === "function") {
+      window.WebApp.shareMaxContent({ text: shareText, link: shareLink });
+      return;
+    }
+  } catch (e) {
+    console.error("shareMaxContent error", e);
   }
 
-  if (hasWebApp() && typeof window.WebApp.shareContent === "function") {
-    window.WebApp.shareContent({ text: shareText, link: shareLink });
-    return;
+  try {
+    if (hasWebApp() && typeof window.WebApp.shareContent === "function") {
+      window.WebApp.shareContent({ text: shareText, link: shareLink });
+      return;
+    }
+  } catch (e) {
+    console.error("shareContent error", e);
   }
 
   if (navigator.share) {
-    navigator.share({ text: shareText, url: shareLink }).catch(() => {});
-    return;
+    try {
+      await navigator.share({ text: shareText, url: shareLink });
+      return; // пользователь успешно поделился
+    } catch (e) {
+      // Пользователь отменил ИЛИ share не работает в этой среде.
+      // Раньше код на этом молча останавливался — теперь идём дальше.
+      console.warn("navigator.share недоступен, пробуем буфер обмена", e);
+    }
   }
 
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(`${shareText} ${shareLink}`);
-    alert("Ссылка на тест и результат скопированы — вставьте в чат, чтобы поделиться!");
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(`${shareText} ${shareLink}`);
+      alert("Ссылка на тест и результат скопированы — вставьте в чат, чтобы поделиться!");
+      return;
+    }
+  } catch (e) {
+    console.error("clipboard error", e);
   }
+
+  // Гарантированный последний fallback — показать текст в диалоге,
+  // чтобы можно было скопировать вручную, даже если всё остальное недоступно.
+  prompt("Скопируйте текст и ссылку, чтобы поделиться:", `${shareText} ${shareLink}`);
 };
+
+// --- Диагностика для отладки на реальном телефоне (без DevTools) ---
+// Откройте страницу с ?debug=1 в конце адреса, например:
+// https://xn--d1aeghrfjy.online/max/?test=11&debug=1
+// Внизу экрана появится панель с информацией о том, что реально доступно
+// в window.WebApp на этом устройстве — пришлите скриншот для диагностики.
+function renderDebugPanel() {
+  if (new URLSearchParams(location.search).get("debug") !== "1") return;
+
+  const info = {
+    hasWebApp: hasWebApp(),
+    webAppKeys: hasWebApp() ? Object.keys(window.WebApp) : [],
+    hasClose: hasWebApp() && typeof window.WebApp.close === "function",
+    hasOpenMaxLink: hasWebApp() && typeof window.WebApp.openMaxLink === "function",
+    hasOpenLink: hasWebApp() && typeof window.WebApp.openLink === "function",
+    hasShareMaxContent: hasWebApp() && typeof window.WebApp.shareMaxContent === "function",
+    hasShareContent: hasWebApp() && typeof window.WebApp.shareContent === "function",
+    hasNavigatorShare: typeof navigator.share === "function",
+    platform: hasWebApp() && window.WebApp.platform,
+    version: hasWebApp() && window.WebApp.version,
+    userAgent: navigator.userAgent
+  };
+
+  const pre = document.createElement("pre");
+  pre.id = "debug-panel";
+  pre.textContent = JSON.stringify(info, null, 2);
+  document.body.appendChild(pre);
+}
 
 function renderStart() {
   quiz = tests[testIndex];
 
   app.innerHTML = `
     <section class="card start">
-      <div class="test-counter">ТЕСТ ${testIndex + 1} ИЗ ${tests.length}</div>
+      <div class="test-counter">Тест ${testIndex + 1} из ${tests.length}</div>
       <h1>${esc(quiz.title)}</h1>
       ${quiz.hook ? `<p class="hook">${esc(quiz.hook)}</p>` : ""}
       <div class="meta">${quiz.questions.length} вопросов · 4 варианта ответа</div>
 
-      <div class="start-actions">
-        <button class="primary" onclick="startQuiz()">Пройти тест</button>
-        <button class="secondary" onclick="nextTest()">Следующий</button>
-        <button class="secondary" onclick="returnToChannel()">Вернуться на канал</button>
-      </div>
+      <button class="primary" onclick="startQuiz()">Пройти тест</button>
     </section>
+
+    <nav class="actions-panel">
+      <button class="panel-btn" onclick="nextTest()">Следующий</button>
+      <a class="panel-btn" href="${CHANNEL_URL}" onclick="return handleReturnToChannel(event)">Вернуться на канал</a>
+    </nav>
   `;
+  renderDebugPanel();
 }
 
 window.startQuiz = function() {
@@ -287,14 +365,15 @@ function renderQuestion() {
       </div>
 
       <button id="next" class="primary disabled" disabled>Далее</button>
-
-      <div class="quiz-actions">
-        <button class="secondary" onclick="goToFirstTest()">Все тесты</button>
-        <button class="secondary" onclick="nextTest()">Следующий</button>
-        <button class="secondary" onclick="returnToChannel()">Вернуться в канал</button>
-      </div>
     </section>
+
+    <nav class="actions-panel">
+      <button class="panel-btn" onclick="goToFirstTest()">Все тесты</button>
+      <button class="panel-btn" onclick="nextTest()">Следующий</button>
+      <a class="panel-btn" href="${CHANNEL_URL}" onclick="return handleReturnToChannel(event)">Вернуться в канал</a>
+    </nav>
   `;
+  renderDebugPanel();
 }
 
 window.choose = function(letter) {
@@ -337,11 +416,15 @@ function showResult() {
       <p>${esc(lastResult.text || "Результат определён по вашим ответам.")}</p>
 
       <button class="primary" onclick="startQuiz()">Пройти ещё раз</button>
-      <button class="secondary" onclick="shareResult()">Поделиться результатом</button>
-      <button class="secondary" onclick="nextTest()">Следующий тест</button>
-      <button class="secondary" onclick="returnToChannel()">Вернуться на канал</button>
     </section>
+
+    <nav class="actions-panel">
+      <button class="panel-btn" onclick="shareResult()">Поделиться результатом</button>
+      <button class="panel-btn" onclick="nextTest()">Следующий</button>
+      <a class="panel-btn" href="${CHANNEL_URL}" onclick="return handleReturnToChannel(event)">Вернуться на канал</a>
+    </nav>
   `;
+  renderDebugPanel();
 }
 
 async function loadQuiz() {
