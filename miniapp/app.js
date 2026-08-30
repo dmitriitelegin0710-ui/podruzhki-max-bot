@@ -2,7 +2,7 @@ const DEFAULT_TEST = 1;
 const TOTAL_TESTS = 24;
 
 // Ссылка на канал MAX — используется кнопкой "Вернуться на канал"
-// на стартовом экране теста и на экране результата.
+// на стартовом экране теста, на экране вопроса и на экране результата.
 const CHANNEL_URL = "https://max.ru/channel_podruzhki";
 
 let tests = [];
@@ -133,20 +133,46 @@ function parseAllTests(md) {
 }
 
 // --- Интеграция с MAX Bridge (window.WebApp) ---
-// Обе функции ниже безопасно работают и без MAX Bridge (например, при
+// Функции ниже безопасно работают и без MAX Bridge (например, при
 // открытии mini app напрямую в обычном браузере для проверки) — тогда
 // используется обычный переход по ссылке / нативный шеринг браузера.
+//
+// ВАЖНО: window.WebApp и его методы по-настоящему работают только внутри
+// реального клиента MAX (телефон/десктоп/офиц. веб-клиент). Если открыть
+// ссылку теста просто в Chrome/Safari напрямую — WebApp будет либо
+// отсутствовать, либо его методы не дадут эффекта, и сработает последний
+// fallback (location.href). Это нормально и не является багом кода —
+// проверять "Вернуться на канал" нужно из реального поста/бота в MAX.
 
 function hasWebApp() {
   return typeof window.WebApp !== "undefined" && window.WebApp !== null;
 }
 
 window.returnToChannel = function() {
-  if (hasWebApp() && typeof window.WebApp.openMaxLink === "function") {
-    window.WebApp.openMaxLink(CHANNEL_URL);
-  } else {
-    window.location.href = CHANNEL_URL;
+  try {
+    if (hasWebApp()) {
+      // 1) Предпочтительный способ — открыть диплинк max.ru внутри самого MAX.
+      if (typeof window.WebApp.openMaxLink === "function") {
+        window.WebApp.openMaxLink(CHANNEL_URL);
+        return;
+      }
+      // 2) Если openMaxLink недоступен в этой версии/платформе клиента —
+      //    открываем ту же ссылку через штатный "внешний" метод openLink.
+      //    Раньше здесь сразу шёл location.href, из-за чего внутри WebView
+      //    мини-приложения переход просто блокировался и кнопка казалась
+      //    нерабочей.
+      if (typeof window.WebApp.openLink === "function") {
+        window.WebApp.openLink(CHANNEL_URL);
+        return;
+      }
+    }
+  } catch (e) {
+    console.error("returnToChannel: ошибка при вызове MAX Bridge", e);
   }
+
+  // 3) Финальный fallback — обычный переход по ссылке.
+  //    Актуален только если страница открыта вне MAX (прямой браузер).
+  window.location.href = CHANNEL_URL;
 };
 
 window.shareResult = function() {
@@ -204,8 +230,21 @@ window.startQuiz = function() {
 
 window.nextTest = function() {
   testIndex = (testIndex + 1) % tests.length;
+  current = 0;
+  answers = [];
   const url = new URL(location.href);
   url.searchParams.set("test", String(testIndex + 1));
+  history.replaceState(null, "", url);
+  renderStart();
+};
+
+// Возврат к самому первому тесту из общего списка ("Все тесты").
+window.goToFirstTest = function() {
+  testIndex = 0;
+  current = 0;
+  answers = [];
+  const url = new URL(location.href);
+  url.searchParams.set("test", "1");
   history.replaceState(null, "", url);
   renderStart();
 };
@@ -235,6 +274,12 @@ function renderQuestion() {
       </div>
 
       <button id="next" class="primary disabled" disabled>Далее</button>
+
+      <div class="quiz-actions">
+        <button class="secondary" onclick="goToFirstTest()">Все тесты</button>
+        <button class="secondary" onclick="nextTest()">Следующий тест</button>
+        <button class="secondary" onclick="returnToChannel()">Вернуться в канал</button>
+      </div>
     </section>
   `;
 }
