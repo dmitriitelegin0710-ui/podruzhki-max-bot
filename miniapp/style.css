@@ -206,6 +206,15 @@ p {
 .site-placeholder {
   cursor: not-allowed;
 }
+.quiz-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.quiz-actions .secondary {
+  margin-top: 0;
+}
+ 
 
 .result .secondary {
   margin-top: 10px;
