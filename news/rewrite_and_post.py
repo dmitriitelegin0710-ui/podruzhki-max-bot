@@ -9,8 +9,14 @@
 Фото: сначала пробуем реальное фото статьи-источника (image_url, извлечённое
 в gdelt_search.py из og:image) — оно соответствует новости, но это чужая
 редакционная фотография без явных прав на переиспользование (сознательно
-принятый риск). Если фото у статьи нет — берём тематическое стоковое фото
-с Pexels как запасной вариант.
+принятый риск). Если фото у статьи нет — раньше подставлялось случайное
+стоковое фото с Pexels по одному из 4 общих "гламурных" слов (гламур
+звезды/красная дорожка/...) — независимо от того, о чём вообще новость.
+ИЗМЕНЕНО: теперь в этом случае сначала отдельным лёгким запросом к
+YandexGPT (generate_photo_keywords) по уже переписанному тексту поста
+подбираются 2-3 английских ключевых слова, которые точно описывают СМЫСЛ
+именно этой новости — и только если по ним ничего не нашлось на Pexels,
+используются старые общие "гламурные" слова как запасной вариант.
 
 За один запуск публикует не больше POSTS_PER_RUN новостей — сейчас 1,
 расписание в news_post.yml вызывает скрипт несколько раз в день, чтобы
@@ -157,12 +163,68 @@ def source_name(url: str) -> str:
     return domain.split(".")[0].capitalize()
 
 
-def get_post_image(article: dict):
-    """Сначала пробуем реальное фото статьи, иначе — стоковое с Pexels."""
+def generate_photo_keywords(post_text: str) -> list:
+    """НОВОЕ: по уже переписанному тексту поста просит YandexGPT
+    сформулировать 2-3 ключевых слова на английском для поиска ФОТО НА
+    PEXELS, точно отражающих смысл именно этой новости — используется
+    только как запасной вариант, когда у статьи-источника нет собственного
+    image_url. Возвращает список слов от самого точного к самому общему;
+    fetch_pexels_image пробует их по очереди. При любой ошибке или пустом
+    результате возвращает [] — тогда используются старые общие
+    PHOTO_KEYWORDS."""
+    if not post_text:
+        return []
+
+    plain_text = re.sub(r'[*_+#]', '', post_text).strip()[:700]
+    if not plain_text:
+        return []
+
+    prompt = (
+        "Ниже текст новостного поста о шоу-бизнесе для женского паблика в "
+        "мессенджере. Придумай 2-3 ключевых слова НА АНГЛИЙСКОМ ЯЗЫКЕ для "
+        "поиска стоковой фотографии на Pexels, которая максимально точно "
+        "иллюстрировала бы главную тему и настроение именно этой новости "
+        "(например, если пост про свадьбу — 'wedding celebration', если про "
+        "выход в свет на премьере — 'red carpet premiere', и т.п., а не "
+        "просто общие слова про шоу-бизнес). Ставь слова по порядку от "
+        "самого точного к более общему.\n"
+        "Ответь СТРОГО в формате: keyword phrase one, keyword phrase two, "
+        "keyword phrase three — без кавычек, без нумерации, без пояснений, "
+        "только сами фразы через запятую.\n\n"
+        f"Текст поста:\n{plain_text}"
+    )
+    body = {
+        "modelUri": YANDEXGPT_MODEL_URI_TEMPLATE.format(folder_id=YANDEX_FOLDER_ID),
+        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": 60},
+        "messages": [{"role": "user", "text": prompt}],
+    }
+    headers = {
+        "Authorization": f"Api-Key {YANDEX_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = requests.post(YANDEXGPT_URL, headers=headers, json=body, timeout=20)
+        resp.raise_for_status()
+        raw = resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
+        keywords = [kw.strip(" .\"'") for kw in raw.split(",") if kw.strip(" .\"'")]
+        if keywords:
+            print(f"Ключевые слова для фото по тексту новости: {keywords}")
+            return keywords
+    except Exception as e:
+        print(f"Не удалось сгенерировать ключевые слова для фото по тексту новости — {e}")
+    return []
+
+
+def get_post_image(article: dict, post_text: str = None):
+    """Сначала пробуем реальное фото статьи. Если его нет — сначала
+    пробуем ключевые слова, сгенерированные по смыслу переписанного текста
+    поста (post_text), а если это не сработало — старые общие PHOTO_KEYWORDS
+    как запасной вариант."""
     image_url = article.get("image_url")
     if image_url:
         return image_url
-    return fetch_pexels_image(PHOTO_KEYWORDS)
+    dynamic_keywords = generate_photo_keywords(post_text) if post_text else []
+    return fetch_pexels_image(dynamic_keywords + PHOTO_KEYWORDS)
 
 
 def try_post_article(article: dict) -> bool:
@@ -185,7 +247,7 @@ def try_post_article(article: dict) -> bool:
 
     attachments = []
     try:
-        image_url = get_post_image(article)
+        image_url = get_post_image(article, post_text=rewritten)
         if image_url:
             token = upload_media_and_get_token(image_url)
             if token:
