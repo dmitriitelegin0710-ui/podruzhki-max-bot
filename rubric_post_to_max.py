@@ -10,12 +10,24 @@
 mini app), чтобы название и хук теста в канале и в mini app совпадали
 всегда, без ручного дублирования данных.
 
+Кнопка "Пройти тест" теперь открывает сайт как настоящее Mini App
+(type=open_app), а не как обычную ссылку (type=link). Раньше клик по
+кнопке открывал сайт во внешнем браузере (Opera и т.п.) — там window.WebApp
+не привязан к реальной сессии MAX, и close()/openMaxLink()/shareMaxContent()
+не работают. Через open_app сайт запускается внутри MAX по-настоящему,
+и мост MAX Bridge (window.WebApp) активен.
+
 Запускается по расписанию через GitHub Actions (см. rubric_post.yml),
 раз в 30 минут проверяет, не пора ли публиковать очередную рубрику.
 
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY   — как и раньше
   YANDEX_API_KEY, YANDEX_FOLDER_ID             — для YandexGPT
+  MAX_BOT_USERNAME                             — НОВЫЙ секрет, юзернейм
+                                                  бота без "@" (нужен для
+                                                  кнопки open_app). Узнать:
+                                                  curl -H "Authorization: <токен>"
+                                                  https://platform-api2.max.ru/me
 """
 import json
 import os
@@ -32,6 +44,9 @@ CHAT_ID = os.environ["MAX_CHAT_ID"]
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 YANDEX_API_KEY = os.environ["YANDEX_API_KEY"]
 YANDEX_FOLDER_ID = os.environ["YANDEX_FOLDER_ID"]
+# Юзернейм бота (без "@") — нужен для кнопки open_app рубрики "Тест дня",
+# чтобы сайт запускался как настоящее Mini App, а не как обычная ссылка.
+BOT_USERNAME = os.environ["MAX_BOT_USERNAME"]
 
 RUBRICS_FILE = "rubrics.json"
 HOLIDAYS_FILE = "max_women_holidays.json"
@@ -47,6 +62,8 @@ WOMEN_STORIES_FILE = "women_success_stories.json"
 # запускает скрипт из корня репозитория (там же лежит rubrics.json и т.д.).
 TESTS_MD_FILE = "miniapp/tests/test-001.md"
 TOTAL_TESTS = 24
+# MINIAPP_BASE_URL сейчас не используется в кнопке (кнопка стала open_app,
+# а не link), но оставлена — вдруг понадобится как fallback-ссылка позже.
 MINIAPP_BASE_URL = "https://xn--d1aeghrfjy.online/max/"
 # Ссылки на сайт со всеми тестами пока нет (там ещё не обновлено под общий
 # список) — поэтому вместо кликабельной кнопки в пост добавляется обычная
@@ -385,19 +402,27 @@ def build_test_dnya_post(target_date):
 
 
 def build_test_dnya_attachments(test_number: int):
-    """Кнопки под постом рубрики «Тест дня»:
-      - «Пройти этот тест» — рабочая ссылка на конкретный тест в mini app;
-      - блок про сайт — временно ТЕКСТ-заглушка (не кнопка), потому что
-        актуальной ссылки на список тестов на сайте пока нет. Как только
-        ссылка появится, замените вызов ниже на:
-            build_link_button_attachment(SITE_TESTS_URL, "Все тесты на сайте")
-        и добавьте эту кнопку вторым элементом в тот же список [[ ... ]],
-        чтобы обе кнопки шли в один ряд.
+    """Кнопка под постом рубрики «Тест дня»:
+      - «Пройти этот тест» — кнопка типа open_app, привязанная к боту
+        (BOT_USERNAME). Раньше это была кнопка type=link с прямым URL на
+        сайт — она открывала сайт как обычную веб-страницу во внешнем
+        браузере, и window.WebApp там не работал по-настоящему. Через
+        open_app сайт запускается как настоящее Mini App внутри MAX.
+      - Номер теста передаётся через payload (например "test11") и
+        читается в app.js как window.WebApp.initDataUnsafe.start_param.
+      - Блок про сайт со списком всех тестов пока остаётся ТЕКСТ-заглушкой
+        (не кнопкой), т.к. рабочей ссылки на список тестов на сайте ещё
+        нет. Когда появится, добавьте вторую кнопку в тот же список [[ ... ]].
     """
     return [{
         "type": "inline_keyboard",
         "payload": {"buttons": [[
-            {"type": "link", "text": "Пройти этот и другие тесты 🧠", "url": f"{MINIAPP_BASE_URL}?test={test_number}"},
+            {
+                "type": "open_app",
+                "text": "Пройти этот и другие тесты 🧠",
+                "web_app": BOT_USERNAME,
+                "payload": f"test{test_number}",
+            },
         ]]},
     }]
 
