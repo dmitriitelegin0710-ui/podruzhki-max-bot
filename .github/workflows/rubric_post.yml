@@ -39,6 +39,7 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+          MAX_BOT_USERNAME: ${{ secrets.MAX_BOT_USERNAME }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       - name: Сохранить журнал опубликованных рубрик
         run: |
