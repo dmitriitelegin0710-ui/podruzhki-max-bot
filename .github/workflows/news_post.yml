@@ -36,7 +36,7 @@ jobs:
         run: python news/gdelt_search.py
       - name: Отфильтровать статьи
         run: python news/filter_articles.py
-      - name: Рерайт и публикация в MAX
+      - name: Рерайт и публикация в MAX и Telegram
         run: python news/rewrite_and_post.py
         env:
           MAX_BOT_TOKEN: ${{ secrets.MAX_BOT_TOKEN }}
@@ -44,6 +44,12 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
+          # НОВОЕ: публикация в Telegram-канал опциональна — если эти два
+          # секрета не заданы в репозитории, telegram_common.is_configured()
+          # вернёт False и rewrite_and_post.py просто пропустит публикацию
+          # туда, ничего не сломав в шаге для MAX.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       - name: Сохранить журнал опубликованных новостей
         run: |
