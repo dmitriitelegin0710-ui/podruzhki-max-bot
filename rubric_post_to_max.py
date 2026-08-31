@@ -20,6 +20,24 @@ mini app), чтобы название и хук теста в канале и �
 Запускается по расписанию через GitHub Actions (см. rubric_post.yml),
 раз в 30 минут проверяет, не пора ли публиковать очередную рубрику.
 
+--- ПОДБОР ФОТО (ИЗМЕНЕНО) ---
+Раньше ключевые слова для поиска на Pexels брались ТОЛЬКО из статичного поля
+photo_keywords / photo_keywords_by_weekday в rubrics.json — то есть одни и те
+же 1-3 слова на всю рубрику, независимо от того, какой конкретно текст
+сегодня сгенерировал YandexGPT. Из-за этого фото попадало "в общую тему",
+но часто мимо конкретного смысла поста.
+
+Теперь, после того как текст поста уже сгенерирован, отдельным лёгким
+запросом к YandexGPT (generate_photo_keywords) он переводится в 2-3
+английских ключевых слова, максимально точно описывающих СМЫСЛ именно
+сегодняшнего текста. Эти динамические слова пробуются для поиска на Pexels
+в первую очередь, а статичные слова из rubrics.json остаются запасным
+вариантом (если динамический запрос не сработал или по нему ничего не
+нашлось). Также при выборе конкретного фото среди результатов Pexels
+теперь берётся случайное не из всех 10 найденных, а из топ-3 самых
+релевантных — чтобы сохранить точность, но не постить каждый день одно и
+то же фото.
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY   — как и раньше
   YANDEX_API_KEY, YANDEX_FOLDER_ID             — для YandexGPT
@@ -116,16 +134,16 @@ POST_STRUCTURE_INSTRUCTIONS = """
 # чтобы посты не были все одного шаблонного размера.
 LENGTH_INSTRUCTIONS = {
     "short": (
-        "Формат — короткий пост на 40-60 слов. Заголовок (короткая цепляющая фраза) "
+        "Формат — короткий пост на 20-40 слов. Заголовок (короткая цепляющая фраза) "
         "и 1-2 небольших абзаца по смыслу. Без лишнего многословия, только суть."
     ),
     "medium": (
-        "Формат — пост на 60-80 слов. Структура: заголовок, затем 2 абзаца "
+        "Формат — пост на 40-60 слов. Структура: заголовок, затем 2 абзаца "
         "(вводит тему → раскрывает суть/совет), в конце — короткий вывод или вопрос к читательницам. "
         "Абзацы разделяй пустой строкой."
     ),
     "long": (
-        "Формат — развёрнутый пост на 80-120 слов. Структура: заголовок, затем 3 абзаца "
+        "Формат — развёрнутый пост на 60-100 слов. Структура: заголовок, затем 3 абзаца "
         "(вводит тему → раскрывает суть, при необходимости с пунктами через «•» → практический пример), "
         "в конце — короткий вывод. Абзацы разделяй пустой строкой."
     ),
@@ -492,58 +510,115 @@ def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str)
     return clean_formatting(raw_text)
 
 
+def generate_photo_keywords(post_text: str) -> list:
+    """НОВОЕ: по готовому тексту поста просит YandexGPT сформулировать 2-3
+    ключевых слова на английском для поиска ФОТО НА PEXELS, максимально точно
+    отражающих смысл и настроение именно этого текста (а не темы рубрики
+    вообще). Возвращает список слов от более специфичного к более общему —
+    fetch_pexels_image пробует их по очереди. При любой ошибке или пустом
+    результате возвращает [] — тогда вызывающий код подставляет статичные
+    photo_keywords из rubrics.json."""
+    if not post_text:
+        return []
+
+    # убираем MAX-разметку (**bold**, _italic_, ++underline++), чтобы не мешала промпту
+    plain_text = re.sub(r'[*_+#]', '', post_text).strip()[:700]
+    if not plain_text:
+        return []
+
+    prompt = (
+        "Ниже текст поста для женского паблика в мессенджере. Придумай 2-3 ключевых "
+        "слова НА АНГЛИЙСКОМ ЯЗЫКЕ для поиска стоковой фотографии на Pexels, которая "
+        "максимально точно иллюстрировала бы главную тему, действие и настроение именно "
+        "этого текста (а не тему рубрики вообще). Ставь слова по порядку от самого "
+        "точного и конкретного к более общему — если конкретное сочетание не найдётся "
+        "на стоке, сработает более общее.\n"
+        "Ответь СТРОГО в формате: keyword phrase one, keyword phrase two, keyword phrase three "
+        "— без кавычек, без нумерации, без пояснений, только сами фразы через запятую.\n\n"
+        f"Текст поста:\n{plain_text}"
+    )
+    body = {
+        "modelUri": YANDEXGPT_MODEL_URI_TEMPLATE.format(folder_id=YANDEX_FOLDER_ID),
+        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": 60},
+        "messages": [{"role": "user", "text": prompt}],
+    }
+    headers = {
+        "Authorization": f"Api-Key {YANDEX_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = requests.post(YANDEXGPT_URL, headers=headers, json=body, timeout=20)
+        resp.raise_for_status()
+        raw = resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
+        keywords = [kw.strip(" .\"'") for kw in raw.split(",") if kw.strip(" .\"'")]
+        if keywords:
+            print(f"Ключевые слова для фото по тексту поста: {keywords}")
+            return keywords
+    except Exception as e:
+        print(f"Не удалось сгенерировать ключевые слова для фото по тексту поста — {e}")
+    return []
+
+
 def fetch_pexels_image(keywords: list):
-    """Случайное фото из нескольких результатов (не всегда первое) —
-    чтобы уменьшить повторы картинок день ото дня."""
+    """Пробует ключевые слова ПО ОЧЕРЕДИ (от самого точного к самому общему —
+    см. get_photo_keywords_for_post), а не случайно выбирает одно слово из
+    списка, как раньше. Как только по какому-то слову нашлись фото, из них
+    берётся случайное НЕ из всех 10 найденных, а из топ-3 самых релевантных
+    по версии Pexels — так фото остаётся точным по смыслу, но не одно и то
+    же изо дня в день."""
     if not keywords or not PEXELS_API_KEY:
         return None
-    keyword = random.choice(keywords)
-    try:
-        resp = requests.get(
-            "https://api.pexels.com/v1/search",
-            params={"query": keyword, "per_page": 10, "orientation": "portrait"},
-            headers={"Authorization": PEXELS_API_KEY},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        photos = resp.json().get("photos") or []
-        if not photos:
-            print(f"Pexels: по запросу '{keyword}' ничего не нашлось")
-            return None
-        return random.choice(photos)["src"]["large"]
-    except Exception as e:
-        print(f"Pexels: ошибка запроса ({keyword}) — {e}")
-        return None
+    for keyword in keywords:
+        try:
+            resp = requests.get(
+                "https://api.pexels.com/v1/search",
+                params={"query": keyword, "per_page": 10, "orientation": "portrait"},
+                headers={"Authorization": PEXELS_API_KEY},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            photos = resp.json().get("photos") or []
+            if not photos:
+                print(f"Pexels: по запросу '{keyword}' ничего не нашлось, пробую следующее слово")
+                continue
+            top_matches = photos[:3]
+            return random.choice(top_matches)["src"]["large"]
+        except Exception as e:
+            print(f"Pexels: ошибка запроса ({keyword}) — {e}")
+    return None
 
 
 def fetch_pexels_video(keywords: list):
     """Короткое вертикальное видео с Pexels Videos (тот же PEXELS_API_KEY, что и для фото,
-    отдельного секрета не требуется). Возвращает прямую ссылку на mp4-файл."""
+    отдельного секрета не требуется). Возвращает прямую ссылку на mp4-файл.
+    Как и fetch_pexels_image, теперь пробует ключевые слова по очереди и
+    берёт случайное из топ-3 самых релевантных результатов."""
     if not keywords or not PEXELS_API_KEY:
         return None
-    keyword = random.choice(keywords)
-    try:
-        resp = requests.get(
-            "https://api.pexels.com/videos/search",
-            params={"query": keyword, "per_page": 10, "orientation": "portrait"},
-            headers={"Authorization": PEXELS_API_KEY},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        videos = resp.json().get("videos") or []
-        if not videos:
-            print(f"Pexels video: по запросу '{keyword}' ничего не нашлось")
-            return None
-        video = random.choice(videos)
-        mp4_files = [vf for vf in (video.get("video_files") or []) if vf.get("file_type") == "video/mp4"]
-        if not mp4_files:
-            return None
-        # берём файл с шириной ближе к 720px — не самое тяжёлое и не самое мыльное качество
-        chosen = min(mp4_files, key=lambda vf: abs((vf.get("width") or 0) - 720))
-        return chosen.get("link")
-    except Exception as e:
-        print(f"Pexels video: ошибка запроса ({keyword}) — {e}")
-        return None
+    for keyword in keywords:
+        try:
+            resp = requests.get(
+                "https://api.pexels.com/videos/search",
+                params={"query": keyword, "per_page": 10, "orientation": "portrait"},
+                headers={"Authorization": PEXELS_API_KEY},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            videos = resp.json().get("videos") or []
+            if not videos:
+                print(f"Pexels video: по запросу '{keyword}' ничего не нашлось, пробую следующее слово")
+                continue
+            top_matches = videos[:3]
+            video = random.choice(top_matches)
+            mp4_files = [vf for vf in (video.get("video_files") or []) if vf.get("file_type") == "video/mp4"]
+            if not mp4_files:
+                continue
+            # берём файл с шириной ближе к 720px — не самое тяжёлое и не самое мыльное качество
+            chosen = min(mp4_files, key=lambda vf: abs((vf.get("width") or 0) - 720))
+            return chosen.get("link")
+        except Exception as e:
+            print(f"Pexels video: ошибка запроса ({keyword}) — {e}")
+    return None
 
 
 def upload_media_and_get_token(media_url: str, media_type: str = "image"):
@@ -616,7 +691,7 @@ def get_video_keywords(rubric: dict, weekday_index: int):
     return get_photo_keywords(rubric, weekday_index)
 
 
-def fetch_and_upload_media(rubric: dict, weekday_index: int):
+def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = None):
     """Готовит вложение (фото или видео) для поста. Поведение управляется
     необязательным полем rubric["media"]:
       не задано / "photo" — как раньше, только фото с Pexels Photos;
@@ -624,17 +699,32 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int):
       "random" — вероятность 40% на видео, иначе фото; если предпочтённый тип
         не нашёлся (пустой результат поиска), подстраховываемся вторым типом,
         чтобы пост не остался совсем без картинки.
+
+    НОВОЕ: post_text — уже сгенерированный текст сегодняшнего поста. Если он
+    передан, сначала пробуем получить ключевые слова динамически по смыслу
+    этого текста (generate_photo_keywords) и ставим их ПЕРЕД статичными
+    photo_keywords/video_keywords из rubrics.json — статичные слова остаются
+    запасным вариантом на случай, если динамический запрос не сработал или
+    по нему ничего не нашлось на Pexels.
     Возвращает готовый attachment-словарь либо None."""
 
+    static_photo_keywords = get_photo_keywords(rubric, weekday_index)
+    static_video_keywords = get_video_keywords(rubric, weekday_index)
+
+    dynamic_keywords = generate_photo_keywords(post_text) if post_text and PEXELS_API_KEY else []
+
+    photo_keywords = dynamic_keywords + static_photo_keywords
+    video_keywords = dynamic_keywords + static_video_keywords
+
     def try_photo():
-        url = fetch_pexels_image(get_photo_keywords(rubric, weekday_index))
+        url = fetch_pexels_image(photo_keywords)
         if not url:
             return None
         token = upload_media_and_get_token(url, media_type="image")
         return {"type": "image", "payload": {"token": token}} if token else None
 
     def try_video():
-        url = fetch_pexels_video(get_video_keywords(rubric, weekday_index))
+        url = fetch_pexels_video(video_keywords)
         if not url:
             return None
         token = upload_media_and_get_token(url, media_type="video")
@@ -719,7 +809,9 @@ def main():
 
         attachments = []
         try:
-            media_attachment = fetch_and_upload_media(rubric, weekday_index)
+            # передаём готовый текст поста, чтобы ключевые слова для фото
+            # подбирались по смыслу именно этого текста, а не только рубрики в целом
+            media_attachment = fetch_and_upload_media(rubric, weekday_index, post_text=text)
             if media_attachment:
                 attachments.append(media_attachment)
         except Exception as e:
