@@ -20,32 +20,32 @@ mini app), чтобы название и хук теста в канале и �
 Запускается по расписанию через GitHub Actions (см. rubric_post.yml),
 раз в 30 минут проверяет, не пора ли публиковать очередную рубрику.
 
---- ПОДБОР ФОТО (ИЗМЕНЕНО) ---
-Раньше ключевые слова для поиска на Pexels брались ТОЛЬКО из статичного поля
-photo_keywords / photo_keywords_by_weekday в rubrics.json — то есть одни и те
-же 1-3 слова на всю рубрику, независимо от того, какой конкретно текст
-сегодня сгенерировал YandexGPT. Из-за этого фото попадало "в общую тему",
-но часто мимо конкретного смысла поста.
+--- ПОДБОР ФОТО ---
+После того как текст поста уже сгенерирован, отдельным лёгким запросом к
+YandexGPT (generate_photo_keywords) он переводится в 2-3 английских
+ключевых слова, максимально точно описывающих СМЫСЛ именно сегодняшнего
+текста. Эти динамические слова пробуются для поиска на Pexels в первую
+очередь, а статичные слова из rubrics.json остаются запасным вариантом.
 
-Теперь, после того как текст поста уже сгенерирован, отдельным лёгким
-запросом к YandexGPT (generate_photo_keywords) он переводится в 2-3
-английских ключевых слова, максимально точно описывающих СМЫСЛ именно
-сегодняшнего текста. Эти динамические слова пробуются для поиска на Pexels
-в первую очередь, а статичные слова из rubrics.json остаются запасным
-вариантом (если динамический запрос не сработал или по нему ничего не
-нашлось). Также при выборе конкретного фото среди результатов Pexels
-теперь берётся случайное не из всех 10 найденных, а из топ-3 самых
-релевантных — чтобы сохранить точность, но не постить каждый день одно и
-то же фото.
+--- НОВОЕ: публикация в Telegram ---
+Если заданы переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID (см.
+telegram_common.py, лежит рядом, в корне репозитория), после успешной
+публикации КАЖДОЙ рубрики в MAX тот же самый пост (тот же текст, то же
+фото/видео) параллельно уходит и в Telegram-канал — полный дубль
+содержимого MAX-канала. Если секреты не заданы — публикация в Telegram
+просто пропускается, ничего не ломая. Как и в новостях, MAX остаётся
+источником истины для "опубликовано/не опубликовано": неуспех в Telegram
+только логируется.
+Функция fetch_and_upload_media теперь возвращает ещё и исходный URL медиа
+(до загрузки в MAX, в виде токена) — раньше этот URL терялся сразу после
+загрузки, а для Telegram он нужен, чтобы скачать то же самое изображение/
+видео ещё раз.
 
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY   — как и раньше
   YANDEX_API_KEY, YANDEX_FOLDER_ID             — для YandexGPT
-  MAX_BOT_USERNAME                             — НОВЫЙ секрет, юзернейм
-                                                  бота без "@" (нужен для
-                                                  кнопки open_app). Узнать:
-                                                  curl -H "Authorization: <токен>"
-                                                  https://platform-api2.max.ru/me
+  MAX_BOT_USERNAME                             — юзернейм бота без "@"
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID         — новое, опционально
 """
 import json
 import os
@@ -56,14 +56,14 @@ from datetime import datetime
 import requests
 import pytz
 
+import telegram_common
+
 # ---- НАСТРОЙКИ ----
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
 CHAT_ID = os.environ["MAX_CHAT_ID"]
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 YANDEX_API_KEY = os.environ["YANDEX_API_KEY"]
 YANDEX_FOLDER_ID = os.environ["YANDEX_FOLDER_ID"]
-# Юзернейм бота (без "@") — нужен для кнопки open_app рубрики "Тест дня",
-# чтобы сайт запускался как настоящее Mini App, а не как обычная ссылка.
 BOT_USERNAME = os.environ["MAX_BOT_USERNAME"]
 
 RUBRICS_FILE = "rubrics.json"
@@ -75,26 +75,14 @@ PALMISTRY_FILE = "palmistry.json"
 OMENS_FILE = "omens.json"
 WOMEN_STORIES_FILE = "women_success_stories.json"
 
-# --- Рубрика "Тест дня" ---
-# Путь указан от корня репозитория podruzhki-max-bot, т.к. GitHub Actions
-# запускает скрипт из корня репозитория (там же лежит rubrics.json и т.д.).
 TESTS_MD_FILE = "miniapp/tests/test-001.md"
 TOTAL_TESTS = 24
-# MINIAPP_BASE_URL сейчас не используется в кнопке (кнопка стала open_app,
-# а не link), но оставлена — вдруг понадобится как fallback-ссылка позже.
 MINIAPP_BASE_URL = "https://xn--d1aeghrfjy.online/max/"
-# Ссылки на сайт со всеми тестами пока нет (там ещё не обновлено под общий
-# список) — поэтому вместо кликабельной кнопки в пост добавляется обычная
-# текстовая строка-заглушка. Когда появится реальная ссылка, замените
-# использование SITE_TESTS_PLACEHOLDER_LINE на build_link_button_attachment(...)
-# внутри build_test_dnya_attachments().
 SITE_TESTS_PLACEHOLDER_LINE = "📚 Все тесты — совсем скоро здесь появится ссылка на сайт"
 
 TIMEZONE = "Europe/Moscow"
 API_BASE = "https://platform-api2.max.ru"
 YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
-# Версия модели закреплена явно (не "latest"), чтобы Яндекс не мог молча
-# подменить её на другую ревизию/уровень мощности.
 YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 DEFAULT_BUTTON_TEXT = "Читать на сайте"
 
@@ -130,8 +118,6 @@ POST_STRUCTURE_INSTRUCTIONS = """
 Абзацы разделяй пустой строкой.
 """
 
-# Длина и структура поста разная по рубрикам — задаётся полем "length" в rubrics.json,
-# чтобы посты не были все одного шаблонного размера.
 LENGTH_INSTRUCTIONS = {
     "short": (
         "Формат — короткий пост на 20-40 слов. Заголовок (короткая цепляющая фраза) "
@@ -161,43 +147,25 @@ def load_holidays() -> dict:
 
 
 def load_json_file(path: str):
-    """Общий загрузчик для новых справочников рубрики «Эзотерика»
-    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json)."""
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _weekday_number(name: str) -> int:
     return {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
     }[name]
 
 
 def _month_number(name: str) -> int:
     return {
-        "january": 1,
-        "february": 2,
-        "march": 3,
-        "april": 4,
-        "may": 5,
-        "june": 6,
-        "july": 7,
-        "august": 8,
-        "september": 9,
-        "october": 10,
-        "november": 11,
-        "december": 12,
+        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
     }[name]
 
 
 def _matches_floating_rule(rule: str, target_date) -> bool:
-    # Поддерживаются только правила, реально записанные в max_women_holidays.json.
     if rule == "256th_day_of_year":
         return target_date.timetuple().tm_yday == 256
 
@@ -220,12 +188,7 @@ def _matches_floating_rule(rule: str, target_date) -> bool:
         next_week = target_date + __import__("datetime").timedelta(days=7)
         return next_week.month != month
 
-    ordinal_number = {
-        "first": 1,
-        "second": 2,
-        "third": 3,
-        "fourth": 4,
-    }[ordinal]
+    ordinal_number = {"first": 1, "second": 2, "third": 3, "fourth": 4}[ordinal]
     return ((target_date.day - 1) // 7 + 1) == ordinal_number
 
 
@@ -242,16 +205,9 @@ def get_holiday_for_date(target_date, holidays: dict):
     if not candidates:
         return None
 
-    # Сначала используем priority из самого JSON.
-    priority_order = holidays.get(
-        "priority_order",
-        ["very_high", "high", "medium", "low"],
-    )
-    priority_rank = {
-        value: index for index, value in enumerate(priority_order)
-    }
+    priority_order = holidays.get("priority_order", ["very_high", "high", "medium", "low"])
+    priority_rank = {value: index for index, value in enumerate(priority_order)}
 
-    # При одинаковом priority сохраняем порядок записей в JSON.
     return min(
         enumerate(candidates),
         key=lambda pair: (priority_rank.get(pair[1].get("priority"), len(priority_rank)), pair[0]),
@@ -263,8 +219,6 @@ def format_holiday_paragraph(holiday: dict) -> str:
 
 
 def calculate_numerology_number(target_date) -> int:
-    """Число дня по методу Пифагора — считается из сегодняшней календарной даты,
-    а НЕ из даты рождения читательницы (в MAX нет формы ввода)."""
     digits = [int(ch) for ch in target_date.strftime("%d%m%Y")]
     total = sum(digits)
     while total > 9 and total not in (11, 22, 33):
@@ -273,13 +227,9 @@ def calculate_numerology_number(target_date) -> int:
 
 
 def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
-    """Рубрика «Эзотерика и Таро» ротирует источник по дням недели:
-    пн/пт — карта Таро, вт/сб — число дня (нумерология), ср — линия ладони
-    (хиромантия), чт/вс — народная примета. Реальный факт из JSON подставляется
-    в промпт, чтобы YandexGPT раскрывал его, а не выдумывал что-то от себя."""
     rng = random.Random(f"{target_date.isoformat()}-ezoterika")
 
-    if weekday_index in (0, 4):  # понедельник, пятница — Таро
+    if weekday_index in (0, 4):
         deck = load_json_file(TAROT_FILE)
         all_cards = list(deck["major_arcana"])
         for suit_cards in deck["minor_arcana"].values():
@@ -299,7 +249,7 @@ def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
             f"В деньгах: {sphere['money']}."
         )
 
-    if weekday_index in (1, 5):  # вторник, суббота — нумерология
+    if weekday_index in (1, 5):
         numerology = load_json_file(NUMEROLOGY_FILE)
         number = calculate_numerology_number(target_date)
         entry = numerology["numbers"][str(number)]
@@ -314,7 +264,7 @@ def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
             f"В карьере: {entry['career']}"
         )
 
-    if weekday_index == 2:  # среда — хиромантия
+    if weekday_index == 2:
         palmistry = load_json_file(PALMISTRY_FILE)
         line_keys = list(palmistry["lines"].keys())
         line_key = line_keys[target_date.isocalendar()[1] % len(line_keys)]
@@ -328,7 +278,6 @@ def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
             f"Значение: {line['meaning_general']}"
         )
 
-    # четверг, воскресенье — народные приметы
     omens = load_json_file(OMENS_FILE)
     category = rng.choice(list(omens["categories"].values()))
     item = rng.choice(category["items"])
@@ -349,11 +298,6 @@ STORY_CLOSING_LINES = [
 
 
 def build_istoriya_zhenshiny_post(target_date) -> str:
-    """Пост для рубрики «История сильной женщины» собирается напрямую из
-    women_success_stories.json — БЕЗ обращения к YandexGPT. Только реальные факты,
-    оформленные под фирменный стиль канала (эмодзи, жирный текст MAX-разметки, структура).
-    История дня выбирается по номеру календарного дня — полный проход по списку без
-    повторов, прежде чем начать заново."""
     stories = load_json_file(WOMEN_STORIES_FILE)["stories"]
     story = stories[target_date.toordinal() % len(stories)]
     closing = STORY_CLOSING_LINES[target_date.toordinal() % len(STORY_CLOSING_LINES)]
@@ -369,14 +313,9 @@ def build_istoriya_zhenshiny_post(target_date) -> str:
 
 
 def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
-    """Вытаскивает заголовок и хук каждого из 24 тестов прямо из markdown-файла
-    miniapp/tests/test-001.md — того же самого файла, который на клиенте парсит
-    app.js (функция parseAllTests). Данные не дублируются в отдельный JSON,
-    поэтому заголовок теста в посте канала и в mini app всегда совпадают."""
     with open(path, encoding="utf-8") as f:
         content = f.read()
 
-    # Каждый тест в файле начинается со строки вида "# 4. Название теста"
     blocks = re.split(r"(?=^#\s+\d+\.\s+)", content, flags=re.MULTILINE)
 
     tests = []
@@ -404,14 +343,10 @@ def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
 
 
 def build_test_dnya_post(target_date):
-    """Тест дня — по той же схеме, что и «История сильной женщины»: полный
-    проход по всем 24 тестам без повторов, потом заново. test_number (1..24)
-    — это именно тот номер, который app.js ожидает в параметре ?test=.
-    Возвращает (текст_поста, test_number)."""
     tests = load_tests_from_md()
     index = target_date.toordinal() % len(tests)
     test = tests[index]
-    test_number = index + 1  # app.js использует 1-based номер теста
+    test_number = index + 1
 
     text = f"🧠 **Тест дня: {test['title']}**"
     if test["hook"]:
@@ -420,18 +355,6 @@ def build_test_dnya_post(target_date):
 
 
 def build_test_dnya_attachments(test_number: int):
-    """Кнопка под постом рубрики «Тест дня»:
-      - «Пройти этот тест» — кнопка типа open_app, привязанная к боту
-        (BOT_USERNAME). Раньше это была кнопка type=link с прямым URL на
-        сайт — она открывала сайт как обычную веб-страницу во внешнем
-        браузере, и window.WebApp там не работал по-настоящему. Через
-        open_app сайт запускается как настоящее Mini App внутри MAX.
-      - Номер теста передаётся через payload (например "test11") и
-        читается в app.js как window.WebApp.initDataUnsafe.start_param.
-      - Блок про сайт со списком всех тестов пока остаётся ТЕКСТ-заглушкой
-        (не кнопкой), т.к. рабочей ссылки на список тестов на сайте ещё
-        нет. Когда появится, добавьте вторую кнопку в тот же список [[ ... ]].
-    """
     return [{
         "type": "inline_keyboard",
         "payload": {"buttons": [[
@@ -468,14 +391,9 @@ def get_season(month: int) -> str:
 
 
 def clean_formatting(text: str) -> str:
-    """MAX умеет показывать **жирный**, _курсив_ и ++подчёркивание++ — это НЕ вырезаем.
-    Убираем только то, что MAX не поддерживает или что модель иногда добавляет по ошибке:
-    markdown-заголовки (### ...), код в обратных кавычках, зачёркивание, и одиночные
-    "лишние" звёздочки-маркеры списков (модели иногда тянет писать "* пункт" вместо "• пункт")."""
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'`{1,3}(.+?)`{1,3}', r'\1', text)
     text = re.sub(r'~~(.+?)~~', r'\1', text)
-    # одиночная "*", не входящая в пару "**", — это случайный маркер списка, а не разметка
     text = re.sub(r'(?<!\*)\*(?!\*)\s*', '', text)
     return text.strip()
 
@@ -511,17 +429,9 @@ def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str)
 
 
 def generate_photo_keywords(post_text: str) -> list:
-    """НОВОЕ: по готовому тексту поста просит YandexGPT сформулировать 2-3
-    ключевых слова на английском для поиска ФОТО НА PEXELS, максимально точно
-    отражающих смысл и настроение именно этого текста (а не темы рубрики
-    вообще). Возвращает список слов от более специфичного к более общему —
-    fetch_pexels_image пробует их по очереди. При любой ошибке или пустом
-    результате возвращает [] — тогда вызывающий код подставляет статичные
-    photo_keywords из rubrics.json."""
     if not post_text:
         return []
 
-    # убираем MAX-разметку (**bold**, _italic_, ++underline++), чтобы не мешала промпту
     plain_text = re.sub(r'[*_+#]', '', post_text).strip()[:700]
     if not plain_text:
         return []
@@ -560,12 +470,6 @@ def generate_photo_keywords(post_text: str) -> list:
 
 
 def fetch_pexels_image(keywords: list):
-    """Пробует ключевые слова ПО ОЧЕРЕДИ (от самого точного к самому общему —
-    см. get_photo_keywords_for_post), а не случайно выбирает одно слово из
-    списка, как раньше. Как только по какому-то слову нашлись фото, из них
-    берётся случайное НЕ из всех 10 найденных, а из топ-3 самых релевантных
-    по версии Pexels — так фото остаётся точным по смыслу, но не одно и то
-    же изо дня в день."""
     if not keywords or not PEXELS_API_KEY:
         return None
     for keyword in keywords:
@@ -589,10 +493,6 @@ def fetch_pexels_image(keywords: list):
 
 
 def fetch_pexels_video(keywords: list):
-    """Короткое вертикальное видео с Pexels Videos (тот же PEXELS_API_KEY, что и для фото,
-    отдельного секрета не требуется). Возвращает прямую ссылку на mp4-файл.
-    Как и fetch_pexels_image, теперь пробует ключевые слова по очереди и
-    берёт случайное из топ-3 самых релевантных результатов."""
     if not keywords or not PEXELS_API_KEY:
         return None
     for keyword in keywords:
@@ -613,7 +513,6 @@ def fetch_pexels_video(keywords: list):
             mp4_files = [vf for vf in (video.get("video_files") or []) if vf.get("file_type") == "video/mp4"]
             if not mp4_files:
                 continue
-            # берём файл с шириной ближе к 720px — не самое тяжёлое и не самое мыльное качество
             chosen = min(mp4_files, key=lambda vf: abs((vf.get("width") or 0) - 720))
             return chosen.get("link")
         except Exception as e:
@@ -640,8 +539,6 @@ def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     upload_resp.raise_for_status()
 
     if not token:
-        # Для video/audio ответ загрузки — служебный XML без токена (он уже был в meta выше),
-        # поэтому json() здесь ожидаемо может не сработать для видео — это нормально.
         try:
             body = upload_resp.json()
             token = body.get("token")
@@ -666,7 +563,6 @@ def build_link_button_attachment(site_url, button_text=None):
 def send_message(text: str, attachments=None) -> requests.Response:
     url = f"{API_BASE}/messages?chat_id={CHAT_ID}"
     headers = {"Authorization": BOT_TOKEN}
-    # format="markdown" — включает реальное форматирование MAX (**bold**, ++underline++, _italic_)
     payload = {"text": text, "format": "markdown"}
     if attachments:
         payload["attachments"] = attachments
@@ -681,8 +577,6 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
 
 
 def get_video_keywords(rubric: dict, weekday_index: int):
-    """Если для рубрики не заданы отдельные ключевые слова под видео
-    (video_keywords / video_keywords_by_weekday), используются те же слова, что для фото."""
     by_weekday = rubric.get("video_keywords_by_weekday")
     if by_weekday:
         return by_weekday.get(str(weekday_index), [])
@@ -692,21 +586,11 @@ def get_video_keywords(rubric: dict, weekday_index: int):
 
 
 def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = None):
-    """Готовит вложение (фото или видео) для поста. Поведение управляется
-    необязательным полем rubric["media"]:
-      не задано / "photo" — как раньше, только фото с Pexels Photos;
-      "video"  — только короткое видео с Pexels Videos;
-      "random" — вероятность 40% на видео, иначе фото; если предпочтённый тип
-        не нашёлся (пустой результат поиска), подстраховываемся вторым типом,
-        чтобы пост не остался совсем без картинки.
-
-    НОВОЕ: post_text — уже сгенерированный текст сегодняшнего поста. Если он
-    передан, сначала пробуем получить ключевые слова динамически по смыслу
-    этого текста (generate_photo_keywords) и ставим их ПЕРЕД статичными
-    photo_keywords/video_keywords из rubrics.json — статичные слова остаются
-    запасным вариантом на случай, если динамический запрос не сработал или
-    по нему ничего не нашлось на Pexels.
-    Возвращает готовый attachment-словарь либо None."""
+    """Готовит вложение (фото или видео) для поста в MAX.
+    ИЗМЕНЕНО: теперь возвращает кортеж (attachment, media_url, media_type)
+    вместо одного attachment — media_url и media_type (image/video) нужны,
+    чтобы то же самое медиа можно было отдельно отправить в Telegram через
+    telegram_common.py, не теряя URL сразу после загрузки в MAX."""
 
     static_photo_keywords = get_photo_keywords(rubric, weekday_index)
     static_video_keywords = get_video_keywords(rubric, weekday_index)
@@ -719,128 +603,27 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = No
     def try_photo():
         url = fetch_pexels_image(photo_keywords)
         if not url:
-            return None
+            return None, None, None
         token = upload_media_and_get_token(url, media_type="image")
-        return {"type": "image", "payload": {"token": token}} if token else None
+        attachment = {"type": "image", "payload": {"token": token}} if token else None
+        return attachment, url, "image"
 
     def try_video():
         url = fetch_pexels_video(video_keywords)
         if not url:
-            return None
+            return None, None, None
         token = upload_media_and_get_token(url, media_type="video")
-        return {"type": "video", "payload": {"token": token}} if token else None
+        attachment = {"type": "video", "payload": {"token": token}} if token else None
+        return attachment, url, "video"
 
     media_mode = rubric.get("media", "photo")
 
     if media_mode == "video":
-        return try_video() or try_photo()
+        result = try_video()
+        return result if result[0] else try_photo()
     if media_mode == "random":
         if random.random() < 0.4:
-            return try_video() or try_photo()
-        return try_photo() or try_video()
-    return try_photo()
-
-
-def main():
-    tz = pytz.timezone(TIMEZONE)
-    now = datetime.now(tz)
-    today_str = now.strftime("%Y-%m-%d")
-    weekday_index = now.weekday()  # 0 = понедельник
-    weekday_names = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
-    weekday_name = weekday_names[weekday_index]
-    date_human = f"{now.day} {MONTHS_RU[now.month - 1]} {now.year} года"
-    season = get_season(now.month)
-
-    print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')} ({weekday_name}, {season})")
-
-    rubrics = load_rubrics()
-    holidays = load_holidays()
-    state = load_state()
-    changed = False
-
-    for rubric in rubrics:
-        record_key = f"{today_str}_{rubric['key']}"
-        if record_key in state:
-            continue
-
-        # Рубрики с полем "days" публикуются только в указанные дни недели
-        # (0 = понедельник ... 6 = воскресенье). Рубрики без этого поля —
-        # ежедневные "якоря", их поведение не меняется.
-        allowed_days = rubric.get("days")
-        if allowed_days is not None and weekday_index not in allowed_days:
-            continue
-
-        scheduled_h, scheduled_m = (int(p) for p in rubric["time"].split(":"))
-        scheduled_dt = now.replace(hour=scheduled_h, minute=scheduled_m, second=0, microsecond=0)
-
-        if now < scheduled_dt:
-            continue
-
-        print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
-
-        test_number = None  # используется только для test_dnya, для кнопок ниже
-
-        try:
-            if rubric["key"] == "test_dnya":
-                text, test_number = build_test_dnya_post(now.date())
-            elif rubric["key"] == "istoriya_zhenshiny":
-                text = build_istoriya_zhenshiny_post(now.date())
-            else:
-                active_rubric = rubric
-                if rubric["key"] == "ezoterika":
-                    try:
-                        ezoterika_topic = get_ezoterika_topic_hint(weekday_index, now.date())
-                        active_rubric = {**rubric, "topic_hint": ezoterika_topic}
-                    except Exception as e:
-                        print(
-                            f"Рубрика ezoterika: не удалось подготовить факт из JSON ({e}), "
-                            "публикую с topic_hint по умолчанию"
-                        )
-                text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
-
-            if rubric["key"] == "utro_privet":
-                holiday = get_holiday_for_date(now.date(), holidays)
-                if holiday:
-                    text += format_holiday_paragraph(holiday)
-                    print(f"Праздник на сегодня: {holiday['name']}")
-        except Exception as e:
-            print(f"Рубрика {rubric['key']}: ошибка генерации текста — {e}. Пропускаю на этот раз.")
-            continue
-
-        attachments = []
-        try:
-            # передаём готовый текст поста, чтобы ключевые слова для фото
-            # подбирались по смыслу именно этого текста, а не только рубрики в целом
-            media_attachment = fetch_and_upload_media(rubric, weekday_index, post_text=text)
-            if media_attachment:
-                attachments.append(media_attachment)
-        except Exception as e:
-            print(f"Рубрика {rubric['key']}: ошибка при подготовке медиа — {e}. Публикую без него.")
-
-        if rubric["key"] == "test_dnya":
-            # Пока нет ссылки на сайт со списком тестов — добавляем текстовую
-            # заглушку прямо в текст поста (не кнопку, некликабельно).
-            text += f"\n\n{SITE_TESTS_PLACEHOLDER_LINE}"
-            attachments.extend(build_test_dnya_attachments(test_number))
-        else:
-            button = build_link_button_attachment(rubric.get("site_link"))
-            if button:
-                attachments.append(button)
-
-        response = send_message(text, attachments or None)
-        print(f"Рубрика {rubric['key']}: статус {response.status_code}, ответ: {response.text[:200]}")
-
-        if response.status_code == 200:
-            state.add(record_key)
-            changed = True
-        else:
-            print(f"Рубрика {rubric['key']}: НЕ опубликовано, проверьте токены/права бота")
-
-    if changed:
-        save_state(state)
-    else:
-        print("Подходящих рубрик на этот запуск не найдено")
-
-
-if __name__ == "__main__":
-    main()
+            result = try_video()
+            return result if result[0] else try_photo()
+        result = try_photo()
+        return result if result[0] else try_video()
