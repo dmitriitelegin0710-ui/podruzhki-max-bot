@@ -16,6 +16,22 @@
 расписание в news_post.yml вызывает скрипт несколько раз в день, чтобы
 новости не приходили пачкой, а были распределены по дню.
 
+--- ИЗМЕНЕНО: устойчивость к "зависанию" на одной статье ---
+Раньше скрипт брал СТРОГО первую статью из очереди (new_articles[:1]) и,
+если у неё падал рерайт (например, YandexGPT отказывался переписывать
+текст из-за встроенного контент-фильтра на чувствительную тему), просто
+завершал запуск ничего не опубликовав — при этом статья не помечалась как
+опубликованная и на следующий запуск снова оказывалась первой в очереди.
+Если такая статья случайно возникала в начале очереди (из-за огрехов в
+фильтре на этапе filter_articles.py), новости переставали публиковаться
+вообще, при этом никакой ошибки в логах workflow не было — скрипт просто
+тихо завершался с "Публиковать нечего".
+
+Теперь скрипт пробует НЕСКОЛЬКО кандидатов за один запуск (см.
+MAX_ATTEMPTS_PER_RUN) и останавливается, как только наберёт нужное
+количество успешных публикаций (POSTS_PER_RUN) — одна проблемная статья
+больше не блокирует все остальные.
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY   — как у rubric_post_to_max.py
   YANDEX_API_KEY, YANDEX_FOLDER_ID             — как у rubric_post_to_max.py
@@ -44,6 +60,9 @@ YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion
 YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 
 POSTS_PER_RUN = 1
+# НОВОЕ: сколько кандидатов из очереди готовы попробовать за один запуск,
+# прежде чем сдаться. Раньше пробовалась только 1 (=POSTS_PER_RUN) статья.
+MAX_ATTEMPTS_PER_RUN = 5
 
 EMOJI_POOL = ["🎬", "⭐", "📸", "🎤", "✨", "💫"]
 
@@ -146,6 +165,44 @@ def get_post_image(article: dict):
     return fetch_pexels_image(PHOTO_KEYWORDS)
 
 
+def try_post_article(article: dict) -> bool:
+    """Пытается переписать и опубликовать одну статью.
+    Возвращает True при успешной публикации, False при любой неудаче
+    (ошибка рерайта или неуспешный ответ MAX API) — вызывающий код в этом
+    случае переходит к следующему кандидату, а не сдаётся полностью."""
+    title = article.get("title", "")
+    url = article["url"]
+    print(f"Обрабатываю: {title} ({url})")
+
+    try:
+        rewritten = rewrite_article(title, article.get("text", ""))
+    except Exception as e:
+        print(f"Ошибка рерайта — {e}. Пропускаю эту статью на этот раз (не отмечаю как опубликованную).")
+        return False
+
+    emoji = random.choice(EMOJI_POOL)
+    post_text = f"{emoji} {rewritten}\n\n_Источник: {source_name(url)}_"
+
+    attachments = []
+    try:
+        image_url = get_post_image(article)
+        if image_url:
+            token = upload_media_and_get_token(image_url)
+            if token:
+                attachments.append({"type": "image", "payload": {"token": token}})
+    except Exception as e:
+        print(f"Ошибка при подготовке фото — {e}. Публикую без него.")
+
+    response = send_message(post_text, attachments or None)
+    print(f"Статус публикации: {response.status_code}, ответ: {response.text[:200]}")
+
+    if response.status_code == 200:
+        return True
+
+    print("НЕ опубликовано, проверьте токены/права бота")
+    return False
+
+
 def main():
     articles = load_filtered()
     state = load_state()
@@ -154,45 +211,31 @@ def main():
     print(f"Всего отфильтрованных статей: {len(articles)}")
     print(f"Ещё не опубликовано: {len(new_articles)}")
 
-    to_post = new_articles[:POSTS_PER_RUN]
-    if not to_post:
+    if not new_articles:
         print("Публиковать нечего на этот запуск")
         return
 
+    candidates = new_articles[:MAX_ATTEMPTS_PER_RUN]
     changed = False
+    posted_count = 0
 
-    for article in to_post:
-        title = article.get("title", "")
-        url = article["url"]
-        print(f"Обрабатываю: {title} ({url})")
+    for article in candidates:
+        if posted_count >= POSTS_PER_RUN:
+            break
 
-        try:
-            rewritten = rewrite_article(title, article.get("text", ""))
-        except Exception as e:
-            print(f"Ошибка рерайта — {e}. Пропускаю эту статью на этот раз (не отмечаю как опубликованную).")
-            continue
-
-        emoji = random.choice(EMOJI_POOL)
-        post_text = f"{emoji} {rewritten}\n\n_Источник: {source_name(url)}_"
-
-        attachments = []
-        try:
-            image_url = get_post_image(article)
-            if image_url:
-                token = upload_media_and_get_token(image_url)
-                if token:
-                    attachments.append({"type": "image", "payload": {"token": token}})
-        except Exception as e:
-            print(f"Ошибка при подготовке фото — {e}. Публикую без него.")
-
-        response = send_message(post_text, attachments or None)
-        print(f"Статус публикации: {response.status_code}, ответ: {response.text[:200]}")
-
-        if response.status_code == 200:
-            state.add(url)
+        success = try_post_article(article)
+        if success:
+            state.add(article["url"])
             changed = True
-        else:
-            print("НЕ опубликовано, проверьте токены/права бота")
+            posted_count += 1
+        # при неуспехе просто переходим к следующему кандидату из candidates —
+        # проблемная статья не блокирует остальные в этом же запуске
+
+    if posted_count == 0:
+        print(
+            f"Ни одна из {len(candidates)} проверенных статей не опубликовалась в этот раз. "
+            "Проверьте логи выше на ошибки рерайта/публикации."
+        )
 
     if changed:
         save_state(state)
