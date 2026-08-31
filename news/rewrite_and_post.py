@@ -5,7 +5,8 @@
 пропускает уже опубликованные (news/posted_news.json), для новых —
 переписывает текст через YandexGPT (своими словами, без копирования
 чужого текста) и публикует в MAX через max_common.py, а если настроен
-Telegram (см. telegram_common.py) — параллельно публикует тот же пост туда.
+Telegram (см. telegram_common.py в корне репозитория) — параллельно
+публикует тот же пост туда.
 
 Фото: сначала пробуем реальное фото статьи-источника (image_url, извлечённое
 в gdelt_search.py из og:image) — оно соответствует новости, но это чужая
@@ -29,13 +30,10 @@ MAX_ATTEMPTS_PER_RUN) и останавливается, как только н�
 количество успешных публикаций (POSTS_PER_RUN) — одна проблемная статья
 не блокирует все остальные.
 
---- НОВОЕ: защита от публикации отказов YandexGPT ---
+--- Защита от публикации отказов YandexGPT ---
 Иногда YandexGPT вместо рерайта возвращает отказ вида "Я не могу это
 обсуждать" (сработал встроенный контент-фильтр Яндекса на чувствительную
-тему). Раньше такой текст просто публиковался как обычный пост, потому что
-формально запрос к API отрабатывал без ошибки (HTTP 200) — падал только
-рерайт по-настоящему кривых/пустых ответов. Теперь rewrite_article
-проверяет:
+тему). rewrite_article проверяет:
   1) поле "status" у альтернативы в ответе API — если оно
      ALTERNATIVE_STATUS_CONTENT_FILTER, это точный признак срабатывания
      цензуры на стороне Яндекса;
@@ -43,14 +41,14 @@ MAX_ATTEMPTS_PER_RUN) и останавливается, как только н�
      короткую длину (на случай, если поле status не пришло).
 Если сработало любое из двух — поднимается GptRefusalError, статья
 пропускается на этот раз (не публикуется и НЕ отмечается как
-опубликованная, как и при обычной ошибке рерайта), а скрипт переходит
-к следующему кандидату из очереди.
+опубликованная), а скрипт переходит к следующему кандидату из очереди.
 
---- НОВОЕ: публикация в Telegram ---
+--- Публикация в Telegram ---
 Если заданы переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID,
 после успешной публикации в MAX тот же пост (тот же текст, то же фото)
-уходит и в Telegram-канал через telegram_common.py. Если переменные не
-заданы — публикация в Telegram просто пропускается, ничего не ломается.
+уходит и в Telegram-канал через telegram_common.py (лежит в корне
+репозитория — см. импорт с добавлением корня в sys.path ниже). Если
+переменные не заданы — публикация в Telegram просто пропускается.
 MAX остаётся источником истины для "опубликовано/не опубликовано": если
 Telegram по какой-то причине не сработал, это только логируется, но
 статья всё равно считается опубликованной (т.к. в MAX она уже вышла).
@@ -58,12 +56,13 @@ Telegram по какой-то причине не сработал, это то�
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY   — как у rubric_post_to_max.py
   YANDEX_API_KEY, YANDEX_FOLDER_ID             — как у rubric_post_to_max.py
-  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID         — новое, опционально
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID         — опционально
 """
 import json
 import os
 import random
 import re
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -74,6 +73,13 @@ from max_common import (
     upload_media_and_get_token,
     send_message,
 )
+
+# НОВОЕ: telegram_common.py лежит в корне репозитория, а не в news/, чтобы
+# его можно было использовать и из rubric_post_to_max.py (там он тоже
+# лежит рядом, в корне). При запуске "python news/rewrite_and_post.py"
+# Python по умолчанию ищет импорты только в папке news/ (директории самого
+# скрипта), поэтому корень репозитория нужно добавить в sys.path явно.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import telegram_common
 
 FILTERED_FILE = Path("news/filtered_articles.json")
@@ -85,13 +91,10 @@ YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion
 YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 
 POSTS_PER_RUN = 1
-# Сколько кандидатов из очереди готовы попробовать за один запуск,
-# прежде чем сдаться.
 MAX_ATTEMPTS_PER_RUN = 5
 
 EMOJI_POOL = ["🎬", "⭐", "📸", "🎤", "✨", "💫"]
 
-# Запасной пул для случаев, когда у статьи нет собственного фото.
 PHOTO_KEYWORDS = [
     "гламур звезды",
     "красная дорожка",
@@ -99,14 +102,10 @@ PHOTO_KEYWORDS = [
     "вечернее платье",
 ]
 
-# НОВОЕ: статусы ответа YandexGPT, означающие срабатывание встроенного
-# контент-фильтра Яндекса (отказ переписывать текст).
 GPT_REFUSAL_STATUSES = {
     "ALTERNATIVE_STATUS_CONTENT_FILTER",
 }
 
-# НОВОЕ: текстовые признаки отказа — страховка на случай, если поле
-# "status" не пришло или отказ выражен иначе, чем через content filter.
 GPT_REFUSAL_TEXT_PATTERNS = [
     "я не могу это обсуждать",
     "я не могу обсуждать эту тему",
@@ -183,8 +182,6 @@ def clean_formatting(text: str) -> str:
 
 
 def looks_like_gpt_refusal(text: str) -> bool:
-    """НОВОЕ: эвристическая проверка текста ответа на признаки отказа —
-    страховка на случай, если поле status в ответе API не помогло."""
     normalized = text.lower()
     if len(normalized) < 30:
         return True
@@ -192,8 +189,6 @@ def looks_like_gpt_refusal(text: str) -> bool:
 
 
 def rewrite_article(title: str, text: str) -> str:
-    # Обрезаем исходный текст — модели не нужна вся статья целиком,
-    # и это снижает риск, что она случайно скопирует длинный кусок дословно.
     trimmed_text = text[:2500]
 
     prompt = POST_INSTRUCTIONS.format(title=title, text=trimmed_text)
@@ -213,8 +208,6 @@ def rewrite_article(title: str, text: str) -> str:
     alternative = data["result"]["alternatives"][0]
     status = alternative.get("status", "")
 
-    # НОВОЕ: точный признак срабатывания контент-фильтра Яндекса —
-    # проверяем ДО того, как вообще смотрим на текст ответа.
     if status in GPT_REFUSAL_STATUSES:
         raise GptRefusalError(
             f"YandexGPT вернул статус '{status}' — сработал контент-фильтр"
@@ -223,7 +216,6 @@ def rewrite_article(title: str, text: str) -> str:
     raw_text = alternative["message"]["text"].strip()
     cleaned = clean_formatting(raw_text)
 
-    # НОВОЕ: страховка по тексту, если статус не пришёл или пуст.
     if looks_like_gpt_refusal(cleaned):
         raise GptRefusalError(
             "Ответ YandexGPT похож на отказ по содержанию текста"
@@ -233,21 +225,11 @@ def rewrite_article(title: str, text: str) -> str:
 
 
 def source_name(url: str) -> str:
-    # Без точки и домена верхнего уровня — иначе MAX сам превращает
-    # текст вида "site.ru" в кликабельную ссылку.
     domain = urlparse(url).netloc.replace("www.", "")
     return domain.split(".")[0].capitalize()
 
 
 def generate_photo_keywords(post_text: str) -> list:
-    """По уже переписанному тексту поста просит YandexGPT сформулировать
-    2-3 ключевых слова на английском для поиска ФОТО НА PEXELS, точно
-    отражающих смысл именно этой новости — используется только как
-    запасной вариант, когда у статьи-источника нет собственного image_url.
-    Возвращает список слов от самого точного к самому общему;
-    fetch_pexels_image пробует их по очереди. При любой ошибке, отказе
-    модели или пустом результате возвращает [] — тогда используются
-    старые общие PHOTO_KEYWORDS."""
     if not post_text:
         return []
 
@@ -299,10 +281,6 @@ def generate_photo_keywords(post_text: str) -> list:
 
 
 def get_post_image(article: dict, post_text: str = None):
-    """Сначала пробуем реальное фото статьи. Если его нет — сначала
-    пробуем ключевые слова, сгенерированные по смыслу переписанного текста
-    поста (post_text), а если это не сработало — старые общие PHOTO_KEYWORDS
-    как запасной вариант."""
     image_url = article.get("image_url")
     if image_url:
         return image_url
@@ -311,14 +289,6 @@ def get_post_image(article: dict, post_text: str = None):
 
 
 def try_post_article(article: dict) -> bool:
-    """Пытается переписать и опубликовать одну статью в MAX, а если
-    настроен Telegram — и туда же.
-    Возвращает True при успешной публикации в MAX (возвращающий код
-    считает статью опубликованной именно по MAX; неуспех в Telegram
-    только логируется и не меняет этот результат). Возвращает False при
-    любой неудаче до этапа публикации в MAX — включая отказ YandexGPT
-    переписывать текст (см. GptRefusalError) — вызывающий код в этом
-    случае переходит к следующему кандидату, а не сдаётся полностью."""
     title = article.get("title", "")
     url = article["url"]
     print(f"Обрабатываю: {title} ({url})")
@@ -353,9 +323,6 @@ def try_post_article(article: dict) -> bool:
         print("MAX: НЕ опубликовано, проверьте токены/права бота")
         return False
 
-    # НОВОЕ: та же новость параллельно уходит в Telegram, если настроены
-    # секреты TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID. Ошибка тут не влияет
-    # на результат функции — MAX уже опубликовал пост.
     if telegram_common.is_configured():
         try:
             tg_response = telegram_common.send_message(post_text, photo_url=image_url)
@@ -397,8 +364,6 @@ def main():
             state.add(article["url"])
             changed = True
             posted_count += 1
-        # при неуспехе просто переходим к следующему кандидату из candidates —
-        # проблемная статья не блокирует остальные в этом же запуске
 
     if posted_count == 0:
         print(
