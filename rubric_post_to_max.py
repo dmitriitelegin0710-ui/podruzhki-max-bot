@@ -10,15 +10,12 @@
 mini app), чтобы название и хук теста в канале и в mini app совпадали
 всегда, без ручного дублирования данных.
 
-Кнопка "Пройти тест" теперь открывает сайт как настоящее Mini App
-(type=open_app), а не как обычную ссылку (type=link). Раньше клик по
-кнопке открывал сайт во внешнем браузере (Opera и т.п.) — там window.WebApp
-не привязан к реальной сессии MAX, и close()/openMaxLink()/shareMaxContent()
-не работают. Через open_app сайт запускается внутри MAX по-настоящему,
-и мост MAX Bridge (window.WebApp) активен.
+Кнопка "Пройти тест" открывает сайт как настоящее Mini App (type=open_app),
+а не как обычную ссылку (type=link) — раньше клик открывал сайт во внешнем
+браузере, где window.WebApp не привязан к реальной сессии MAX.
 
 Запускается по расписанию через GitHub Actions (см. rubric_post.yml),
-раз в 30 минут проверяет, не пора ли публиковать очередную рубрику.
+раз в 15 минут проверяет, не пора ли публиковать очередную рубрику.
 
 --- ПОДБОР ФОТО ---
 После того как текст поста уже сгенерирован, отдельным лёгким запросом к
@@ -27,25 +24,24 @@ YandexGPT (generate_photo_keywords) он переводится в 2-3 англ�
 текста. Эти динамические слова пробуются для поиска на Pexels в первую
 очередь, а статичные слова из rubrics.json остаются запасным вариантом.
 
---- НОВОЕ: публикация в Telegram ---
-Если заданы переменные окружения TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID (см.
-telegram_common.py, лежит рядом, в корне репозитория), после успешной
-публикации КАЖДОЙ рубрики в MAX тот же самый пост (тот же текст, то же
-фото/видео) параллельно уходит и в Telegram-канал — полный дубль
-содержимого MAX-канала. Если секреты не заданы — публикация в Telegram
-просто пропускается, ничего не ломая. Как и в новостях, MAX остаётся
-источником истины для "опубликовано/не опубликовано": неуспех в Telegram
-только логируется.
-Функция fetch_and_upload_media теперь возвращает ещё и исходный URL медиа
-(до загрузки в MAX, в виде токена) — раньше этот URL терялся сразу после
-загрузки, а для Telegram он нужен, чтобы скачать то же самое изображение/
-видео ещё раз.
+--- Публикация в Telegram БЕЗ повторного вызова YandexGPT ---
+Если заданы TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID (см. telegram_common.py,
+лежит рядом, в корне репозитория), после успешной публикации КАЖДОЙ
+рубрики в MAX тот же пост параллельно уходит и в Telegram-канал — с
+добавленными хэштегами (см. telegram_common.RUBRIC_HASHTAGS), подобранными
+по ключу рубрики, БЕЗ второго вызова YandexGPT. Основной текст и медиа —
+те же, что ушли в MAX. Если секреты не заданы — публикация в Telegram
+просто пропускается. MAX остаётся источником истины для
+"опубликовано/не опубликовано": неуспех в Telegram только логируется.
+fetch_and_upload_media теперь возвращает ещё и исходный URL медиа (до
+загрузки в MAX) и его тип (image/video) — нужно, чтобы то же самое медиа
+можно было отдельно скачать и отправить в Telegram.
 
 Требуемые GitHub Secrets:
-  MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY   — как и раньше
-  YANDEX_API_KEY, YANDEX_FOLDER_ID             — для YandexGPT
+  MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
+  YANDEX_API_KEY, YANDEX_FOLDER_ID
   MAX_BOT_USERNAME                             — юзернейм бота без "@"
-  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID         — новое, опционально
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID         — опционально
 """
 import json
 import os
@@ -147,21 +143,38 @@ def load_holidays() -> dict:
 
 
 def load_json_file(path: str):
+    """Общий загрузчик для справочников рубрики «Эзотерика»
+    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json)."""
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _weekday_number(name: str) -> int:
     return {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6,
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
     }[name]
 
 
 def _month_number(name: str) -> int:
     return {
-        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
-        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
     }[name]
 
 
@@ -188,7 +201,12 @@ def _matches_floating_rule(rule: str, target_date) -> bool:
         next_week = target_date + __import__("datetime").timedelta(days=7)
         return next_week.month != month
 
-    ordinal_number = {"first": 1, "second": 2, "third": 3, "fourth": 4}[ordinal]
+    ordinal_number = {
+        "first": 1,
+        "second": 2,
+        "third": 3,
+        "fourth": 4,
+    }[ordinal]
     return ((target_date.day - 1) // 7 + 1) == ordinal_number
 
 
@@ -205,8 +223,13 @@ def get_holiday_for_date(target_date, holidays: dict):
     if not candidates:
         return None
 
-    priority_order = holidays.get("priority_order", ["very_high", "high", "medium", "low"])
-    priority_rank = {value: index for index, value in enumerate(priority_order)}
+    priority_order = holidays.get(
+        "priority_order",
+        ["very_high", "high", "medium", "low"],
+    )
+    priority_rank = {
+        value: index for index, value in enumerate(priority_order)
+    }
 
     return min(
         enumerate(candidates),
@@ -219,6 +242,8 @@ def format_holiday_paragraph(holiday: dict) -> str:
 
 
 def calculate_numerology_number(target_date) -> int:
+    """Число дня по методу Пифагора — считается из сегодняшней календарной даты,
+    а НЕ из даты рождения читательницы (в MAX нет формы ввода)."""
     digits = [int(ch) for ch in target_date.strftime("%d%m%Y")]
     total = sum(digits)
     while total > 9 and total not in (11, 22, 33):
@@ -227,6 +252,9 @@ def calculate_numerology_number(target_date) -> int:
 
 
 def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
+    """Рубрика «Эзотерика и Таро» ротирует источник по дням недели:
+    пн/пт — карта Таро, вт/сб — число дня (нумерология), ср — линия ладони
+    (хиромантия), чт/вс — народная примета."""
     rng = random.Random(f"{target_date.isoformat()}-ezoterika")
 
     if weekday_index in (0, 4):
@@ -298,6 +326,8 @@ STORY_CLOSING_LINES = [
 
 
 def build_istoriya_zhenshiny_post(target_date) -> str:
+    """Пост для рубрики «История сильной женщины» собирается напрямую из
+    women_success_stories.json — БЕЗ обращения к YandexGPT."""
     stories = load_json_file(WOMEN_STORIES_FILE)["stories"]
     story = stories[target_date.toordinal() % len(stories)]
     closing = STORY_CLOSING_LINES[target_date.toordinal() % len(STORY_CLOSING_LINES)]
@@ -313,6 +343,9 @@ def build_istoriya_zhenshiny_post(target_date) -> str:
 
 
 def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
+    """Вытаскивает заголовок и хук каждого из 24 тестов прямо из markdown-файла
+    miniapp/tests/test-001.md — того же самого файла, который на клиенте парсит
+    app.js (функция parseAllTests)."""
     with open(path, encoding="utf-8") as f:
         content = f.read()
 
@@ -343,6 +376,8 @@ def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
 
 
 def build_test_dnya_post(target_date):
+    """Тест дня — полный проход по всем 24 тестам без повторов, потом заново.
+    Возвращает (текст_поста, test_number)."""
     tests = load_tests_from_md()
     index = target_date.toordinal() % len(tests)
     test = tests[index]
@@ -355,6 +390,9 @@ def build_test_dnya_post(target_date):
 
 
 def build_test_dnya_attachments(test_number: int):
+    """Кнопка типа open_app, привязанная к боту (BOT_USERNAME); номер теста
+    передаётся через payload и читается в app.js как
+    window.WebApp.initDataUnsafe.start_param."""
     return [{
         "type": "inline_keyboard",
         "payload": {"buttons": [[
@@ -391,6 +429,8 @@ def get_season(month: int) -> str:
 
 
 def clean_formatting(text: str) -> str:
+    """MAX умеет показывать **жирный**, _курсив_ и ++подчёркивание++ — это НЕ вырезаем.
+    Убираем только то, что MAX не поддерживает или что модель иногда добавляет по ошибке."""
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'`{1,3}(.+?)`{1,3}', r'\1', text)
     text = re.sub(r'~~(.+?)~~', r'\1', text)
@@ -429,6 +469,9 @@ def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str)
 
 
 def generate_photo_keywords(post_text: str) -> list:
+    """По готовому тексту поста просит YandexGPT сформулировать 2-3
+    ключевых слова на английском для поиска ФОТО НА PEXELS, максимально
+    точно отражающих смысл и настроение именно этого текста."""
     if not post_text:
         return []
 
@@ -441,8 +484,7 @@ def generate_photo_keywords(post_text: str) -> list:
         "слова НА АНГЛИЙСКОМ ЯЗЫКЕ для поиска стоковой фотографии на Pexels, которая "
         "максимально точно иллюстрировала бы главную тему, действие и настроение именно "
         "этого текста (а не тему рубрики вообще). Ставь слова по порядку от самого "
-        "точного и конкретного к более общему — если конкретное сочетание не найдётся "
-        "на стоке, сработает более общее.\n"
+        "точного и конкретного к более общему.\n"
         "Ответь СТРОГО в формате: keyword phrase one, keyword phrase two, keyword phrase three "
         "— без кавычек, без нумерации, без пояснений, только сами фразы через запятую.\n\n"
         f"Текст поста:\n{plain_text}"
@@ -470,6 +512,10 @@ def generate_photo_keywords(post_text: str) -> list:
 
 
 def fetch_pexels_image(keywords: list):
+    """Пробует ключевые слова ПО ОЧЕРЕДИ (от самого точного к самому общему),
+    а не случайно выбирает одно слово из списка. Как только по какому-то
+    слову нашлись фото, из них берётся случайное из топ-3 самых релевантных
+    по версии Pexels."""
     if not keywords or not PEXELS_API_KEY:
         return None
     for keyword in keywords:
@@ -493,6 +539,8 @@ def fetch_pexels_image(keywords: list):
 
 
 def fetch_pexels_video(keywords: list):
+    """Короткое вертикальное видео с Pexels Videos (тот же PEXELS_API_KEY,
+    что и для фото)."""
     if not keywords or not PEXELS_API_KEY:
         return None
     for keyword in keywords:
@@ -577,6 +625,8 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
 
 
 def get_video_keywords(rubric: dict, weekday_index: int):
+    """Если для рубрики не заданы отдельные ключевые слова под видео,
+    используются те же слова, что для фото."""
     by_weekday = rubric.get("video_keywords_by_weekday")
     if by_weekday:
         return by_weekday.get(str(weekday_index), [])
@@ -587,10 +637,10 @@ def get_video_keywords(rubric: dict, weekday_index: int):
 
 def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = None):
     """Готовит вложение (фото или видео) для поста в MAX.
-    ИЗМЕНЕНО: теперь возвращает кортеж (attachment, media_url, media_type)
-    вместо одного attachment — media_url и media_type (image/video) нужны,
-    чтобы то же самое медиа можно было отдельно отправить в Telegram через
-    telegram_common.py, не теряя URL сразу после загрузки в MAX."""
+    Возвращает кортеж (attachment, media_url, media_type) — media_url и
+    media_type (image/video) нужны, чтобы то же самое медиа можно было
+    отдельно отправить в Telegram через telegram_common.py, не теряя URL
+    сразу после загрузки в MAX."""
 
     static_photo_keywords = get_photo_keywords(rubric, weekday_index)
     static_video_keywords = get_video_keywords(rubric, weekday_index)
@@ -627,3 +677,130 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = No
             return result if result[0] else try_photo()
         result = try_photo()
         return result if result[0] else try_video()
+    return try_photo()
+
+
+def main():
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    today_str = now.strftime("%Y-%m-%d")
+    weekday_index = now.weekday()
+    weekday_names = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+    weekday_name = weekday_names[weekday_index]
+    date_human = f"{now.day} {MONTHS_RU[now.month - 1]} {now.year} года"
+    season = get_season(now.month)
+
+    print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')} ({weekday_name}, {season})")
+
+    rubrics = load_rubrics()
+    holidays = load_holidays()
+    state = load_state()
+    changed = False
+
+    for rubric in rubrics:
+        record_key = f"{today_str}_{rubric['key']}"
+        if record_key in state:
+            continue
+
+        allowed_days = rubric.get("days")
+        if allowed_days is not None and weekday_index not in allowed_days:
+            continue
+
+        scheduled_h, scheduled_m = (int(p) for p in rubric["time"].split(":"))
+        scheduled_dt = now.replace(hour=scheduled_h, minute=scheduled_m, second=0, microsecond=0)
+
+        if now < scheduled_dt:
+            continue
+
+        print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
+
+        test_number = None
+
+        try:
+            if rubric["key"] == "test_dnya":
+                text, test_number = build_test_dnya_post(now.date())
+            elif rubric["key"] == "istoriya_zhenshiny":
+                text = build_istoriya_zhenshiny_post(now.date())
+            else:
+                active_rubric = rubric
+                if rubric["key"] == "ezoterika":
+                    try:
+                        ezoterika_topic = get_ezoterika_topic_hint(weekday_index, now.date())
+                        active_rubric = {**rubric, "topic_hint": ezoterika_topic}
+                    except Exception as e:
+                        print(
+                            f"Рубрика ezoterika: не удалось подготовить факт из JSON ({e}), "
+                            "публикую с topic_hint по умолчанию"
+                        )
+                text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
+
+            if rubric["key"] == "utro_privet":
+                holiday = get_holiday_for_date(now.date(), holidays)
+                if holiday:
+                    text += format_holiday_paragraph(holiday)
+                    print(f"Праздник на сегодня: {holiday['name']}")
+        except Exception as e:
+            print(f"Рубрика {rubric['key']}: ошибка генерации текста — {e}. Пропускаю на этот раз.")
+            continue
+
+        attachments = []
+        media_url = None
+        media_type = None
+        try:
+            media_attachment, media_url, media_type = fetch_and_upload_media(
+                rubric, weekday_index, post_text=text
+            )
+            if media_attachment:
+                attachments.append(media_attachment)
+        except Exception as e:
+            print(f"Рубрика {rubric['key']}: ошибка при подготовке медиа — {e}. Публикую без него.")
+
+        if rubric["key"] == "test_dnya":
+            text += f"\n\n{SITE_TESTS_PLACEHOLDER_LINE}"
+            attachments.extend(build_test_dnya_attachments(test_number))
+        else:
+            button = build_link_button_attachment(rubric.get("site_link"))
+            if button:
+                attachments.append(button)
+
+        response = send_message(text, attachments or None)
+        print(f"Рубрика {rubric['key']}: статус {response.status_code}, ответ: {response.text[:200]}")
+
+        if response.status_code == 200:
+            state.add(record_key)
+            changed = True
+
+            # Дублируем пост в Telegram, если настроены секреты. Хэштеги
+            # подбираются по ключу рубрики — БЕЗ повторного вызова YandexGPT.
+            if telegram_common.is_configured():
+                try:
+                    hashtags = telegram_common.RUBRIC_HASHTAGS.get(
+                        rubric["key"], telegram_common.DEFAULT_RUBRIC_HASHTAGS
+                    )
+                    telegram_text = telegram_common.adapt_text_for_telegram_local(text, hashtags)
+                    tg_kwargs = {}
+                    if media_type == "video":
+                        tg_kwargs["video_url"] = media_url
+                    elif media_type == "image":
+                        tg_kwargs["photo_url"] = media_url
+                    tg_response = telegram_common.send_message(telegram_text, **tg_kwargs)
+                    if tg_response.status_code == 200:
+                        print(f"Рубрика {rubric['key']}: опубликовано и в Telegram (хэштеги: {hashtags})")
+                    else:
+                        print(
+                            f"Рубрика {rubric['key']}: Telegram НЕ опубликовано — "
+                            f"статус {tg_response.status_code}, ответ: {tg_response.text[:200]}"
+                        )
+                except Exception as e:
+                    print(f"Рубрика {rubric['key']}: ошибка публикации в Telegram — {e}")
+        else:
+            print(f"Рубрика {rubric['key']}: НЕ опубликовано, проверьте токены/права бота")
+
+    if changed:
+        save_state(state)
+    else:
+        print("Подходящих рубрик на этот запуск не найдено")
+
+
+if __name__ == "__main__":
+    main()
