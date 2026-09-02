@@ -2,7 +2,8 @@
 Скрипт публикации в MAX — по рубрикам вместо Google Таблицы.
 Расписание и темы рубрик — в rubrics.json (лежит рядом с этим файлом).
 Текст поста для каждой рубрики генерирует YandexGPT.
-Картинка — через Pexels Photos API.
+Картинка — сначала из собственной базы фото (photo_bank.py / photo_bank.json),
+а если для рубрики своих фото нет — через Pexels Photos API, как раньше.
 Отправка в MAX — тот же API, что и раньше.
 
 Рубрика "Тест дня" (test_dnya) — исключение: текст берётся не от YandexGPT,
@@ -18,11 +19,22 @@ mini app), чтобы название и хук теста в канале и �
 раз в 15 минут проверяет, не пора ли публиковать очередную рубрику.
 
 --- ПОДБОР ФОТО ---
-После того как текст поста уже сгенерирован, отдельным лёгким запросом к
-YandexGPT (generate_photo_keywords) он переводится в 2-3 английских
-ключевых слова, максимально точно описывающих СМЫСЛ именно сегодняшнего
-текста. Эти динамические слова пробуются для поиска на Pexels в первую
-очередь, а статичные слова из rubrics.json остаются запасным вариантом.
+Порядок попыток при подготовке изображения (см. fetch_and_upload_media):
+  1) Собственная база фото (photo_bank.get_own_photo) — фото, которые вы
+     сами заранее подобрали и загрузили в репозиторий под конкретную
+     рубрику (и опционально день недели). Самый точный вариант, так как
+     подбирался вручную под тему.
+  2) Pexels по динамическим ключевым словам — после того как текст поста
+     уже сгенерирован, отдельным лёгким запросом к YandexGPT
+     (generate_photo_keywords) он переводится в 2-3 английских ключевых
+     слова, максимально точно описывающих СМЫСЛ именно сегодняшнего
+     текста.
+  3) Pexels по статичным ключевым словам из rubrics.json
+     (photo_keywords_by_weekday) — последний запасной вариант.
+Если для рубрики нет записи в photo_bank.json (или список фото пуст),
+шаг 1 просто пропускается и всё работает как раньше, через Pexels — то
+есть добавление своей базы ничего не ломает и не требует правок в
+rubrics.json.
 
 --- Публикация в Telegram БЕЗ повторного вызова YandexGPT ---
 Если заданы TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID (см. telegram_common.py,
@@ -53,6 +65,7 @@ import requests
 import pytz
 
 import telegram_common
+import photo_bank
 
 # ---- НАСТРОЙКИ ----
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
@@ -640,7 +653,11 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = No
     Возвращает кортеж (attachment, media_url, media_type) — media_url и
     media_type (image/video) нужны, чтобы то же самое медиа можно было
     отдельно отправить в Telegram через telegram_common.py, не теряя URL
-    сразу после загрузки в MAX."""
+    сразу после загрузки в MAX.
+
+    Порядок для фото: сначала собственная база (photo_bank.get_own_photo),
+    затем Pexels по динамическим ключевым словам + статичным как fallback.
+    Видео собственной базой пока не покрывается — работает как раньше."""
 
     static_photo_keywords = get_photo_keywords(rubric, weekday_index)
     static_video_keywords = get_video_keywords(rubric, weekday_index)
@@ -651,6 +668,21 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = No
     video_keywords = dynamic_keywords + static_video_keywords
 
     def try_photo():
+        # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
+        try:
+            own_url = photo_bank.get_own_photo(rubric["key"], weekday_index)
+        except Exception as e:
+            print(f"Своя база фото: ошибка чтения ({e}), пропускаю этот шаг")
+            own_url = None
+
+        if own_url:
+            token = upload_media_and_get_token(own_url, media_type="image")
+            if token:
+                print(f"Фото взято из своей базы: {own_url}")
+                return {"type": "image", "payload": {"token": token}}, own_url, "image"
+            print("Своя база фото: не удалось загрузить в MAX, пробую Pexels")
+
+        # 2)-3) Pexels — динамические слова, затем статичные (как и раньше).
         url = fetch_pexels_image(photo_keywords)
         if not url:
             return None, None, None
