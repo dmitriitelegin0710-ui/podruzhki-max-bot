@@ -42,9 +42,9 @@ import requests
 
 OUTPUT_DIR = Path("candidates")
 
-PEXELS_API_KEY = os.environ.get("xN4nYiZOUCV3r8m9pulH68xFUAqHzoOHiSNVwLsLBdillEpigA3NuZcr")
-PIXABAY_API_KEY = os.environ.get("57280474-2c672521e96c8a1217f3c1b56")
-UNSPLASH_ACCESS_KEY = os.environ.get("v97bPrtPBAM1s9WBqR1rfOoO-n6fiF9lj6086AzguEg")
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
+PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY")
+UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY")
 
 # Английские поисковые запросы под каждую рубрику. Для рубрик с
 # photo_keywords_by_weekday в rubrics.json (сейчас — только utro_privet)
