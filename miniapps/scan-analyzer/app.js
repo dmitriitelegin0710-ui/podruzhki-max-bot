@@ -1,16 +1,18 @@
 // ============================================================================
 // НАСТРОЙКА — заполните после того, как разместите backend/server.py
 // ============================================================================
-const BACKEND_BASE_URL = " https://api.xn--d1aeghrfjy.online"; // <-- без слэша на конце
+const BACKEND_BASE_URL = "https://api.xn--d1aeghrfjy.online"; // <-- без слэша на конце
 
 const CHANNEL_URL = "https://max.ru/channel_podruzhki";
 
 const FILTERS = [
-  { id: "none",    label: "Обычный" },
-  { id: "kids",    label: "Для детей" },
-  { id: "allergy", label: "Аллергикам" },
-  { id: "healthy", label: "Для ПП" },
+  { id: "none",    label: "Обычный",    emoji: "🧴" },
+  { id: "kids",    label: "Для детей",  emoji: "🧸" },
+  { id: "allergy", label: "Аллергикам", emoji: "⚠️" },
+  { id: "healthy", label: "Для ПП",     emoji: "🥗" },
 ];
+
+const LOW_BALANCE_THRESHOLD = 1; // при таком количестве и меньше — подсвечиваем счётчик и предлагаем докупить
 
 // ============================================================================
 // СОСТОЯНИЕ
@@ -119,17 +121,43 @@ function renderLoading() {
 }
 
 function renderError() {
-  app.innerHTML = `<div class="error">Не удалось подключиться к серверу.<br>Попробуйте ещё раз чуть позже.</div>`;
+  app.innerHTML = `
+    <div class="error">
+      Не удалось подключиться к серверу.<br>Попробуйте ещё раз чуть позже.
+      <div><button class="retry-btn" id="retry-btn">Повторить</button></div>
+    </div>
+  `;
+  document.getElementById("retry-btn").addEventListener("click", async () => {
+    screen = "loading";
+    render();
+    const ok = await loadBalance();
+    if (!ok) { screen = "error"; render(); return; }
+    screen = balanceInfo.total_available > 0 ? "home" : "paywall";
+    render();
+  });
 }
 
 function balanceChipHtml() {
   const total = balanceInfo ? balanceInfo.total_available : 0;
-  return `<div class="balance-chip">🔍 Осталось сканов: ${total}</div>`;
+  const low = total <= LOW_BALANCE_THRESHOLD;
+  return `
+    <div>
+      <div class="balance-chip ${low ? "low" : ""}">🔍 Осталось сканов: ${total}</div>
+      ${low ? `<div class="topup-link" id="topup-link">Докупить сканы →</div>` : ""}
+    </div>
+  `;
+}
+
+function bindTopupLink() {
+  const el = document.getElementById("topup-link");
+  if (el) el.addEventListener("click", () => { screen = "paywall"; render(); });
 }
 
 function renderHome() {
   const filtersHtml = FILTERS.map(
-    (f) => `<div class="filter-pill ${f.id === activeFilter ? "active" : ""}" data-filter="${f.id}">${esc(f.label)}</div>`
+    (f) => `<div class="filter-pill ${f.id === activeFilter ? "active" : ""}" data-filter="${f.id}">
+              <span class="emoji">${f.emoji}</span>${esc(f.label)}
+            </div>`
   ).join("");
 
   const previewHtml = selectedFile
@@ -166,6 +194,8 @@ function renderHome() {
     const img = document.getElementById("preview-img");
     img.src = URL.createObjectURL(selectedFile);
   }
+
+  bindTopupLink();
 
   document.querySelectorAll(".filter-pill").forEach((el) => {
     el.addEventListener("click", () => {
@@ -227,6 +257,8 @@ function renderResult() {
       <a class="panel-btn" href="${CHANNEL_URL}" id="back-to-channel">⟵ Вернуться на канал</a>
     </div>
   `;
+
+  bindTopupLink();
 
   document.getElementById("scan-again-btn").addEventListener("click", () => {
     selectedFile = null;
