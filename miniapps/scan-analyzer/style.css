@@ -1,0 +1,285 @@
+/* Палитра — та же, что в miniapps/tests, для единого фирменного стиля канала. */
+:root {
+  --bg: #f6f1e6;
+  --paper: #ffffff;
+  --ink: #241f19;
+  --muted: #86796a;
+  --divider: #ece3d3;
+
+  --accent: #b8502f;
+  --accent-dark: #93401f;
+  --accent-soft: #f5e3d8;
+
+  --panel-bg: #17241d;
+  --panel-ink: #f3efe4;
+  --panel-border: rgba(243, 239, 228, .16);
+  --panel-border-hover: rgba(243, 239, 228, .32);
+
+  --good: #3d7a3f;
+  --good-soft: #e4f0e2;
+  --neutral: #a3791f;
+  --neutral-soft: #f6ecd6;
+  --bad: #9a3030;
+  --bad-soft: #f5e0dc;
+  --danger: #9a3030;
+
+  --radius-lg: 22px;
+  --radius-md: 15px;
+  --shadow-card: 0 10px 30px rgba(36, 31, 25, .08);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+#app {
+  width: min(100%, 560px);
+  margin: 0 auto;
+  padding: 18px 14px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-lg);
+  padding: 24px 20px;
+  box-shadow: var(--shadow-card);
+}
+
+h1 {
+  font-size: 25px;
+  line-height: 1.25;
+  margin: 0 0 6px;
+  letter-spacing: -.01em;
+}
+
+p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
+.hint { color: var(--muted); font-size: 14px; }
+
+/* ---------- Счётчик сканирований ---------- */
+
+.balance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.balance-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 100px;
+}
+
+/* ---------- Фильтры ---------- */
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+
+.filter-pill {
+  border: 1px solid var(--divider);
+  background: var(--paper);
+  border-radius: 100px;
+  padding: 10px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+
+.filter-pill.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---------- Камера / загрузка фото ---------- */
+
+.camera-box {
+  border: 2px dashed #d8c9b3;
+  border-radius: var(--radius-md);
+  padding: 34px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.camera-box:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.camera-box .icon { font-size: 40px; margin-bottom: 10px; }
+.camera-box .label { font-weight: 700; font-size: 16px; }
+.camera-box .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+#camera-input { display: none; }
+
+.preview-wrap {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.preview-wrap img {
+  width: 100%;
+  display: block;
+  max-height: 320px;
+  object-fit: cover;
+}
+
+/* ---------- Кнопка-действие ---------- */
+
+.primary {
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-top: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, transform .05s ease;
+}
+
+.primary:hover:not(:disabled) { background: var(--accent-dark); }
+.primary:active:not(:disabled) { transform: scale(.99); }
+.primary:disabled { opacity: .4; cursor: default; }
+
+.secondary {
+  width: 100%;
+  border: 1px solid var(--divider);
+  background: var(--paper);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin-top: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* ---------- Результат анализа ---------- */
+
+.verdict-badge {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 8px 16px;
+  border-radius: 100px;
+  margin-bottom: 14px;
+}
+
+.verdict-good     { background: var(--good-soft);    color: var(--good); }
+.verdict-neutral  { background: var(--neutral-soft); color: var(--neutral); }
+.verdict-caution  { background: var(--neutral-soft); color: var(--neutral); }
+.verdict-bad      { background: var(--bad-soft);     color: var(--bad); }
+.verdict-unknown  { background: var(--divider);      color: var(--muted); }
+
+.result-list {
+  margin: 0 0 14px;
+  padding-left: 18px;
+}
+
+.result-list li { margin-bottom: 6px; line-height: 1.5; }
+
+/* ---------- Пакеты сканирований ---------- */
+
+.packages {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+.package-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.package-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.package-title { font-weight: 700; font-size: 15px; }
+.package-price { font-weight: 800; color: var(--accent-dark); font-size: 16px; }
+
+/* ---------- Служебная панель ---------- */
+
+.actions-panel {
+  background: var(--panel-bg);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.panel-btn {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 13px;
+  padding: 13px 16px;
+  background: transparent;
+  color: var(--panel-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.panel-btn:hover { background: rgba(243, 239, 228, .07); border-color: var(--panel-border-hover); }
+
+/* ---------- Состояния ---------- */
+
+.loading, .error {
+  margin-top: 20vh;
+  text-align: center;
+  color: var(--muted);
+}
+
+.error { color: var(--danger); }
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 14px;
+  border: 3px solid var(--divider);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 380px) {
+  #app { padding: 12px; gap: 12px; }
+  .card { padding: 18px 14px; }
+  h1 { font-size: 22px; }
+}

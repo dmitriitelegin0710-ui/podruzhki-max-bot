@@ -421,6 +421,24 @@ def build_test_dnya_attachments(test_number: int):
     }]
 
 
+def build_scan_app_attachments():
+    """Кнопка типа open_app для рубрики «Сканер состава» — открывает
+    miniapps/scan-analyzer. payload="scan" читается в app.js мини-аппа
+    как window.WebApp.initDataUnsafe.start_param (сейчас там не используется,
+    но передаётся на случай, если понадобится различать точки входа)."""
+    return [{
+        "type": "inline_keyboard",
+        "payload": {"buttons": [[
+            {
+                "type": "open_app",
+                "text": "Сканировать состав 🔍",
+                "web_app": BOT_USERNAME,
+                "payload": "scan",
+            },
+        ]]},
+    }]
+
+
 def load_state() -> set:
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, encoding="utf-8") as f:

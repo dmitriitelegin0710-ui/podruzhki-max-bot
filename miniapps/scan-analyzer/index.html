@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Сканер состава</title>
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <main id="app">
+    <div class="loading">Загрузка…</div>
+  </main>
+  <!-- MAX Bridge — доступ к window.WebApp (initData, шеринг, ссылки).
+       Если открыть страницу вне MAX, скрипт всё равно безопасно подключится,
+       а app.js сам проверяет наличие window.WebApp и использует резервные
+       варианты (device_id вместо initData). -->
+  <script src="https://st.max.ru/js/max-web-app.js"></script>
+  <script src="app.js?v=1"></script>
+</body>
+</html>
