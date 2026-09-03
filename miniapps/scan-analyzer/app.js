@@ -1,7 +1,7 @@
 // ============================================================================
 // НАСТРОЙКА — заполните после того, как разместите backend/server.py
 // ============================================================================
-const BACKEND_BASE_URL = " https://api.xn--d1aeghrfjy.online "; // <-- без слэша на конце
+const BACKEND_BASE_URL = " https://api.xn--d1aeghrfjy.online"; // <-- без слэша на конце
 
 const CHANNEL_URL = "https://max.ru/channel_podruzhki";
 
