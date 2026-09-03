@@ -1,31 +1,34 @@
-/* Палитра — та же, что в miniapps/tests, для единого фирменного стиля канала. */
+/* Спокойная, менее «кричащая» палитра. Один приглушённый акцент вместо
+   яркого терракота, единая система радиусов и теней. */
 :root {
-  --bg: #f6f1e6;
+  --bg: #f4f2ee;
   --paper: #ffffff;
-  --ink: #241f19;
-  --muted: #86796a;
-  --divider: #ece3d3;
+  --ink: #22201d;
+  --muted: #8b8579;
+  --divider: #e7e3da;
 
-  --accent: #b8502f;
-  --accent-dark: #93401f;
-  --accent-soft: #f5e3d8;
+  --accent: #7a6a52;      /* приглушённый тёплый серо-коричневый вместо яркого оранжевого */
+  --accent-dark: #5f5340;
+  --accent-soft: #efece4;
+  --accent-contrast: #ffffff;
 
-  --panel-bg: #17241d;
-  --panel-ink: #f3efe4;
-  --panel-border: rgba(243, 239, 228, .16);
-  --panel-border-hover: rgba(243, 239, 228, .32);
+  --panel-bg: #1c2620;
+  --panel-ink: #f0ede4;
+  --panel-border: rgba(240, 237, 228, .14);
+  --panel-border-hover: rgba(240, 237, 228, .28);
 
-  --good: #3d7a3f;
-  --good-soft: #e4f0e2;
-  --neutral: #a3791f;
-  --neutral-soft: #f6ecd6;
-  --bad: #9a3030;
-  --bad-soft: #f5e0dc;
-  --danger: #9a3030;
+  --good: #3f7a4f;
+  --good-soft: #e5f0e6;
+  --neutral: #93762a;
+  --neutral-soft: #f3ecd8;
+  --bad: #a5433a;
+  --bad-soft: #f6e4e1;
+  --danger: #a5433a;
 
-  --radius-lg: 22px;
-  --radius-md: 15px;
-  --shadow-card: 0 10px 30px rgba(36, 31, 25, .08);
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-sm: 12px;
+  --shadow-card: 0 8px 24px rgba(34, 32, 29, .06);
 }
 
 * { box-sizing: border-box; }
@@ -36,6 +39,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
 }
 
 #app {
@@ -44,34 +48,36 @@ body {
   padding: 18px 14px 40px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .card {
   background: var(--paper);
   border: 1px solid var(--divider);
   border-radius: var(--radius-lg);
-  padding: 24px 20px;
+  padding: 22px 20px;
   box-shadow: var(--shadow-card);
 }
 
 h1 {
-  font-size: 25px;
-  line-height: 1.25;
+  font-size: 22px;
+  line-height: 1.3;
   margin: 0 0 6px;
   letter-spacing: -.01em;
+  font-weight: 700;
 }
 
-p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
-.hint { color: var(--muted); font-size: 14px; }
+p { font-size: 15px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
+.hint { color: var(--muted); font-size: 13.5px; }
 
 /* ---------- Счётчик сканирований ---------- */
 
 .balance-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+  margin-bottom: 4px;
 }
 
 .balance-chip {
@@ -80,17 +86,34 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
   gap: 6px;
   background: var(--accent-soft);
   color: var(--accent-dark);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
-  padding: 7px 12px;
+  padding: 6px 11px;
   border-radius: 100px;
+  white-space: nowrap;
+}
+
+.balance-chip.low {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.topup-link {
+  display: block;
+  text-align: right;
+  font-size: 12px;
+  color: var(--accent-dark);
+  font-weight: 600;
+  margin-top: 4px;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 /* ---------- Фильтры ---------- */
 
 .filters {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin: 14px 0 18px;
 }
@@ -98,28 +121,35 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
 .filter-pill {
   border: 1px solid var(--divider);
   background: var(--paper);
-  border-radius: 100px;
-  padding: 10px 6px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  padding: 12px 8px;
+  font-size: 13.5px;
   font-weight: 600;
   text-align: center;
   color: var(--ink);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   transition: border-color .15s ease, background .15s ease, color .15s ease;
 }
+
+.filter-pill .emoji { font-size: 15px; }
 
 .filter-pill.active {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* ---------- Камера / загрузка фото ---------- */
 
 .camera-box {
-  border: 2px dashed #d8c9b3;
+  border: 1px solid var(--divider);
+  background: #fafaf7;
   border-radius: var(--radius-md);
-  padding: 34px 16px;
+  padding: 30px 16px;
   text-align: center;
   cursor: pointer;
   transition: border-color .15s ease, background .15s ease;
@@ -127,9 +157,9 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
 
 .camera-box:hover { border-color: var(--accent); background: var(--accent-soft); }
 
-.camera-box .icon { font-size: 40px; margin-bottom: 10px; }
-.camera-box .label { font-weight: 700; font-size: 16px; }
-.camera-box .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.camera-box .icon { font-size: 34px; margin-bottom: 8px; opacity: .8; }
+.camera-box .label { font-weight: 700; font-size: 15px; }
+.camera-box .sub { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
 
 #camera-input { display: none; }
 
@@ -138,26 +168,27 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
   border-radius: var(--radius-md);
   overflow: hidden;
   margin-bottom: 14px;
+  border: 1px solid var(--divider);
 }
 
 .preview-wrap img {
   width: 100%;
   display: block;
-  max-height: 320px;
+  max-height: 300px;
   object-fit: cover;
 }
 
-/* ---------- Кнопка-действие ---------- */
+/* ---------- Кнопки-действия ---------- */
 
 .primary {
   width: 100%;
   border: 0;
-  border-radius: 14px;
-  padding: 16px 18px;
+  border-radius: var(--radius-sm);
+  padding: 15px 18px;
   margin-top: 6px;
   background: var(--accent);
-  color: #fff;
-  font-size: 17px;
+  color: var(--accent-contrast);
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   transition: background .15s ease, transform .05s ease;
@@ -165,28 +196,36 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
 
 .primary:hover:not(:disabled) { background: var(--accent-dark); }
 .primary:active:not(:disabled) { transform: scale(.99); }
-.primary:disabled { opacity: .4; cursor: default; }
+
+.primary:disabled {
+  background: var(--divider);
+  color: var(--muted);
+  cursor: default;
+}
 
 .secondary {
   width: 100%;
   border: 1px solid var(--divider);
   background: var(--paper);
-  border-radius: 14px;
-  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  padding: 13px 18px;
   margin-top: 10px;
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--ink);
   cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
 }
+
+.secondary:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 /* ---------- Результат анализа ---------- */
 
 .verdict-badge {
   display: inline-block;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 800;
-  padding: 8px 16px;
+  padding: 8px 15px;
   border-radius: 100px;
   margin-bottom: 14px;
 }
@@ -202,7 +241,7 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
   padding-left: 18px;
 }
 
-.result-list li { margin-bottom: 6px; line-height: 1.5; }
+.result-list li { margin-bottom: 6px; line-height: 1.5; font-size: 14.5px; }
 
 /* ---------- Пакеты сканирований ---------- */
 
@@ -225,15 +264,15 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
 
 .package-card:hover { border-color: var(--accent); background: var(--accent-soft); }
 
-.package-title { font-weight: 700; font-size: 15px; }
-.package-price { font-weight: 800; color: var(--accent-dark); font-size: 16px; }
+.package-title { font-weight: 700; font-size: 14.5px; }
+.package-price { font-weight: 800; color: var(--accent-dark); font-size: 15px; }
 
 /* ---------- Служебная панель ---------- */
 
 .actions-panel {
   background: var(--panel-bg);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  padding: 14px;
   display: grid;
   gap: 8px;
 }
@@ -242,11 +281,11 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
   display: block;
   width: 100%;
   border: 1px solid var(--panel-border);
-  border-radius: 13px;
-  padding: 13px 16px;
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
   background: transparent;
   color: var(--panel-ink);
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
@@ -254,21 +293,35 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
   transition: background .15s ease, border-color .15s ease;
 }
 
-.panel-btn:hover { background: rgba(243, 239, 228, .07); border-color: var(--panel-border-hover); }
+.panel-btn:hover { background: rgba(240, 237, 228, .06); border-color: var(--panel-border-hover); }
 
 /* ---------- Состояния ---------- */
 
 .loading, .error {
-  margin-top: 20vh;
+  margin-top: 18vh;
   text-align: center;
   color: var(--muted);
+  padding: 0 20px;
 }
 
 .error { color: var(--danger); }
 
+.error .retry-btn {
+  margin-top: 16px;
+  display: inline-block;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .spinner {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   margin: 0 auto 14px;
   border: 3px solid var(--divider);
   border-top-color: var(--accent);
@@ -279,7 +332,7 @@ p { font-size: 16px; line-height: 1.55; color: var(--ink); margin: 0 0 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 380px) {
-  #app { padding: 12px; gap: 12px; }
+  #app { padding: 12px; gap: 10px; }
   .card { padding: 18px 14px; }
-  h1 { font-size: 22px; }
+  h1 { font-size: 20px; }
 }
