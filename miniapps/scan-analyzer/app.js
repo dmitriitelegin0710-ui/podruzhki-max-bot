@@ -71,30 +71,53 @@ function deviceIdParam() {
 // API
 // ============================================================================
 
+const REQUEST_TIMEOUT_MS = 12000;
+
+function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function apiGet(path) {
   const qs = deviceIdParam();
   const url = `${BACKEND_BASE_URL}${path}${qs ? (path.includes("?") ? "&" : "?") + qs : ""}`;
-  const res = await fetch(url, { headers: authHeaders() });
-  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetchWithTimeout(url, { headers: authHeaders() });
+    return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    console.error("apiGet failed:", path, e);
+    return { ok: false, status: 0, data: {}, networkError: true };
+  }
 }
 
 async function apiPostJson(path, body) {
-  const res = await fetch(`${BACKEND_BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ ...body, device_id: getInitData() ? undefined : getDeviceId() }),
-  });
-  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetchWithTimeout(`${BACKEND_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ ...body, device_id: getInitData() ? undefined : getDeviceId() }),
+    });
+    return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    console.error("apiPostJson failed:", path, e);
+    return { ok: false, status: 0, data: {}, networkError: true };
+  }
 }
 
 async function apiPostForm(path, formData) {
   if (!getInitData()) formData.append("device_id", getDeviceId());
-  const res = await fetch(`${BACKEND_BASE_URL}${path}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: formData,
-  });
-  return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetchWithTimeout(`${BACKEND_BASE_URL}${path}`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: formData,
+    });
+    return { ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) };
+  } catch (e) {
+    console.error("apiPostForm failed:", path, e);
+    return { ok: false, status: 0, data: {}, networkError: true };
+  }
 }
 
 async function loadBalance() {
