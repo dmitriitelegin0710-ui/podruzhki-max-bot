@@ -7,7 +7,7 @@
 ключевым словам из rubrics.json.
 
 Рубрика "Тест дня" (test_dnya) — исключение: текст берётся не от YandexGPT,
-а напрямую из miniapp/tests/test-001.md (тот же файл, что парсит app.js в
+а напрямую из miniapps/tests/test-001.md (тот же файл, что парсит app.js в
 mini app), чтобы название и хук теста в канале и в mini app совпадали
 всегда, без ручного дублирования данных.
 
@@ -78,15 +78,15 @@ YANDEX_FOLDER_ID = os.environ["YANDEX_FOLDER_ID"]
 BOT_USERNAME = os.environ["MAX_BOT_USERNAME"]
 
 RUBRICS_FILE = "rubrics.json"
-HOLIDAYS_FILE = "max_women_holidays.json"
+HOLIDAYS_FILE = "content/utro_post/max_women_holidays.json"
 STATE_FILE = "posted_rubrics.json"
-TAROT_FILE = "tarot_deck_78.json"
-NUMEROLOGY_FILE = "numerology.json"
-PALMISTRY_FILE = "palmistry.json"
-OMENS_FILE = "omens.json"
-WOMEN_STORIES_FILE = "women_success_stories.json"
+TAROT_FILE = "content/esoterics/tarot_deck_78.json"
+NUMEROLOGY_FILE = "content/esoterics/numerology.json"
+PALMISTRY_FILE = "content/esoterics/palmistry.json"
+OMENS_FILE = "content/esoterics/omens.json"
+WOMEN_STORIES_FILE = "content/history_women_strong/women_success_stories.json"
 
-TESTS_MD_FILE = "miniapp/tests/test-001.md"
+TESTS_MD_FILE = "miniapps/tests/test-001.md"
 TOTAL_TESTS = 24
 MINIAPP_BASE_URL = "https://xn--d1aeghrfjy.online/max/"
 SITE_TESTS_PLACEHOLDER_LINE = "📚 Все тесты — совсем скоро здесь появится ссылка на сайт"
@@ -359,7 +359,7 @@ def build_istoriya_zhenshiny_post(target_date) -> str:
 
 def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
     """Вытаскивает заголовок и хук каждого из 24 тестов прямо из markdown-файла
-    miniapp/tests/test-001.md — того же самого файла, который на клиенте парсит
+    miniapps/tests/test-001.md — того же самого файла, который на клиенте парсит
     app.js (функция parseAllTests)."""
     with open(path, encoding="utf-8") as f:
         content = f.read()
