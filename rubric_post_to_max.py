@@ -3,8 +3,8 @@
 Расписание и темы рубрик — в rubrics.json (лежит рядом с этим файлом).
 Текст поста для каждой рубрики генерирует YandexGPT.
 Картинка — сначала из собственной базы фото (photo_bank.py / photo_bank.json),
-а если для рубрики своих фото нет — через Pexels Photos API, как раньше.
-Отправка в MAX — тот же API, что и раньше.
+а если для рубрики своих фото нет — через Pexels Photos API по статичным
+ключевым словам из rubrics.json.
 
 Рубрика "Тест дня" (test_dnya) — исключение: текст берётся не от YandexGPT,
 а напрямую из miniapp/tests/test-001.md (тот же файл, что парсит app.js в
@@ -24,17 +24,19 @@ mini app), чтобы название и хук теста в канале и �
      сами заранее подобрали и загрузили в репозиторий под конкретную
      рубрику (и опционально день недели). Самый точный вариант, так как
      подбирался вручную под тему.
-  2) Pexels по динамическим ключевым словам — после того как текст поста
-     уже сгенерирован, отдельным лёгким запросом к YandexGPT
-     (generate_photo_keywords) он переводится в 2-3 английских ключевых
-     слова, максимально точно описывающих СМЫСЛ именно сегодняшнего
-     текста.
-  3) Pexels по статичным ключевым словам из rubrics.json
-     (photo_keywords_by_weekday) — последний запасной вариант.
+  2) Pexels по статичным ключевым словам из rubrics.json
+     (photo_keywords / photo_keywords_by_weekday) — запасной вариант, если
+     для рубрики нет своего фото.
 Если для рубрики нет записи в photo_bank.json (или список фото пуст),
 шаг 1 просто пропускается и всё работает как раньше, через Pexels — то
 есть добавление своей базы ничего не ломает и не требует правок в
 rubrics.json.
+
+ВАЖНО: динамическая генерация ключевых слов для фото через YandexGPT
+(по тексту уже готового поста) и вся логика с видео-вложениями УБРАНЫ —
+они увеличивали расход токенов GPT на лишний вызов при каждой публикации,
+даже когда своя база фото уже покрывала рубрику. Теперь для Pexels
+используются только статичные ключевые слова из rubrics.json.
 
 --- Публикация в Telegram БЕЗ повторного вызова YandexGPT ---
 Если заданы TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID (см. telegram_common.py,
@@ -45,9 +47,9 @@ rubrics.json.
 те же, что ушли в MAX. Если секреты не заданы — публикация в Telegram
 просто пропускается. MAX остаётся источником истины для
 "опубликовано/не опубликовано": неуспех в Telegram только логируется.
-fetch_and_upload_media теперь возвращает ещё и исходный URL медиа (до
-загрузки в MAX) и его тип (image/video) — нужно, чтобы то же самое медиа
-можно было отдельно скачать и отправить в Telegram.
+fetch_and_upload_media возвращает ещё и исходный URL медиа (до
+загрузки в MAX) и его тип (сейчас всегда "image") — нужно, чтобы то же
+самое медиа можно было отдельно скачать и отправить в Telegram.
 
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
@@ -481,53 +483,10 @@ def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str)
     return clean_formatting(raw_text)
 
 
-def generate_photo_keywords(post_text: str) -> list:
-    """По готовому тексту поста просит YandexGPT сформулировать 2-3
-    ключевых слова на английском для поиска ФОТО НА PEXELS, максимально
-    точно отражающих смысл и настроение именно этого текста."""
-    if not post_text:
-        return []
-
-    plain_text = re.sub(r'[*_+#]', '', post_text).strip()[:700]
-    if not plain_text:
-        return []
-
-    prompt = (
-        "Ниже текст поста для женского паблика в мессенджере. Придумай 2-3 ключевых "
-        "слова НА АНГЛИЙСКОМ ЯЗЫКЕ для поиска стоковой фотографии на Pexels, которая "
-        "максимально точно иллюстрировала бы главную тему, действие и настроение именно "
-        "этого текста (а не тему рубрики вообще). Ставь слова по порядку от самого "
-        "точного и конкретного к более общему.\n"
-        "Ответь СТРОГО в формате: keyword phrase one, keyword phrase two, keyword phrase three "
-        "— без кавычек, без нумерации, без пояснений, только сами фразы через запятую.\n\n"
-        f"Текст поста:\n{plain_text}"
-    )
-    body = {
-        "modelUri": YANDEXGPT_MODEL_URI_TEMPLATE.format(folder_id=YANDEX_FOLDER_ID),
-        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": 60},
-        "messages": [{"role": "user", "text": prompt}],
-    }
-    headers = {
-        "Authorization": f"Api-Key {YANDEX_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    try:
-        resp = requests.post(YANDEXGPT_URL, headers=headers, json=body, timeout=20)
-        resp.raise_for_status()
-        raw = resp.json()["result"]["alternatives"][0]["message"]["text"].strip()
-        keywords = [kw.strip(" .\"'") for kw in raw.split(",") if kw.strip(" .\"'")]
-        if keywords:
-            print(f"Ключевые слова для фото по тексту поста: {keywords}")
-            return keywords
-    except Exception as e:
-        print(f"Не удалось сгенерировать ключевые слова для фото по тексту поста — {e}")
-    return []
-
-
 def fetch_pexels_image(keywords: list):
-    """Пробует ключевые слова ПО ОЧЕРЕДИ (от самого точного к самому общему),
-    а не случайно выбирает одно слово из списка. Как только по какому-то
-    слову нашлись фото, из них берётся случайное из топ-3 самых релевантных
+    """Пробует ключевые слова ПО ОЧЕРЕДИ (как заданы в rubrics.json), а не
+    случайно выбирает одно слово из списка. Как только по какому-то слову
+    нашлись фото, из них берётся случайное из топ-3 самых релевантных
     по версии Pexels."""
     if not keywords or not PEXELS_API_KEY:
         return None
@@ -548,36 +507,6 @@ def fetch_pexels_image(keywords: list):
             return random.choice(top_matches)["src"]["large"]
         except Exception as e:
             print(f"Pexels: ошибка запроса ({keyword}) — {e}")
-    return None
-
-
-def fetch_pexels_video(keywords: list):
-    """Короткое вертикальное видео с Pexels Videos (тот же PEXELS_API_KEY,
-    что и для фото)."""
-    if not keywords or not PEXELS_API_KEY:
-        return None
-    for keyword in keywords:
-        try:
-            resp = requests.get(
-                "https://api.pexels.com/videos/search",
-                params={"query": keyword, "per_page": 10, "orientation": "portrait"},
-                headers={"Authorization": PEXELS_API_KEY},
-                timeout=20,
-            )
-            resp.raise_for_status()
-            videos = resp.json().get("videos") or []
-            if not videos:
-                print(f"Pexels video: по запросу '{keyword}' ничего не нашлось, пробую следующее слово")
-                continue
-            top_matches = videos[:3]
-            video = random.choice(top_matches)
-            mp4_files = [vf for vf in (video.get("video_files") or []) if vf.get("file_type") == "video/mp4"]
-            if not mp4_files:
-                continue
-            chosen = min(mp4_files, key=lambda vf: abs((vf.get("width") or 0) - 720))
-            return chosen.get("link")
-        except Exception as e:
-            print(f"Pexels video: ошибка запроса ({keyword}) — {e}")
     return None
 
 
@@ -637,79 +566,40 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
     return rubric.get("photo_keywords", [])
 
 
-def get_video_keywords(rubric: dict, weekday_index: int):
-    """Если для рубрики не заданы отдельные ключевые слова под видео,
-    используются те же слова, что для фото."""
-    by_weekday = rubric.get("video_keywords_by_weekday")
-    if by_weekday:
-        return by_weekday.get(str(weekday_index), [])
-    if rubric.get("video_keywords"):
-        return rubric["video_keywords"]
-    return get_photo_keywords(rubric, weekday_index)
-
-
-def fetch_and_upload_media(rubric: dict, weekday_index: int, post_text: str = None):
-    """Готовит вложение (фото или видео) для поста в MAX.
+def fetch_and_upload_media(rubric: dict, weekday_index: int):
+    """Готовит фото-вложение для поста в MAX.
     Возвращает кортеж (attachment, media_url, media_type) — media_url и
-    media_type (image/video) нужны, чтобы то же самое медиа можно было
-    отдельно отправить в Telegram через telegram_common.py, не теряя URL
-    сразу после загрузки в MAX.
+    media_type ("image") нужны, чтобы то же самое медиа можно было
+    отдельно отправить в Telegram через telegram_common.py.
 
-    Порядок для фото: сначала собственная база (photo_bank.get_own_photo),
-    затем Pexels по динамическим ключевым словам + статичным как fallback.
-    Видео собственной базой пока не покрывается — работает как раньше."""
+    Порядок: сначала собственная база (photo_bank.get_own_photo), затем
+    Pexels по статичным ключевым словам из rubrics.json. Никакого
+    обращения к YandexGPT здесь больше нет — раньше отдельный вызов на
+    подбор ключевых слов срабатывал ДАЖЕ когда своя база уже покрывала
+    рубрику, впустую тратя токены. Видео-вложения убраны полностью."""
 
-    static_photo_keywords = get_photo_keywords(rubric, weekday_index)
-    static_video_keywords = get_video_keywords(rubric, weekday_index)
+    # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
+    try:
+        own_url = photo_bank.get_own_photo(rubric["key"], weekday_index)
+    except Exception as e:
+        print(f"Своя база фото: ошибка чтения ({e}), пропускаю этот шаг")
+        own_url = None
 
-    dynamic_keywords = generate_photo_keywords(post_text) if post_text and PEXELS_API_KEY else []
+    if own_url:
+        token = upload_media_and_get_token(own_url, media_type="image")
+        if token:
+            print(f"Фото взято из своей базы: {own_url}")
+            return {"type": "image", "payload": {"token": token}}, own_url, "image"
+        print("Своя база фото: не удалось загрузить в MAX, пробую Pexels")
 
-    photo_keywords = dynamic_keywords + static_photo_keywords
-    video_keywords = dynamic_keywords + static_video_keywords
-
-    def try_photo():
-        # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
-        try:
-            own_url = photo_bank.get_own_photo(rubric["key"], weekday_index)
-        except Exception as e:
-            print(f"Своя база фото: ошибка чтения ({e}), пропускаю этот шаг")
-            own_url = None
-
-        if own_url:
-            token = upload_media_and_get_token(own_url, media_type="image")
-            if token:
-                print(f"Фото взято из своей базы: {own_url}")
-                return {"type": "image", "payload": {"token": token}}, own_url, "image"
-            print("Своя база фото: не удалось загрузить в MAX, пробую Pexels")
-
-        # 2)-3) Pexels — динамические слова, затем статичные (как и раньше).
-        url = fetch_pexels_image(photo_keywords)
-        if not url:
-            return None, None, None
-        token = upload_media_and_get_token(url, media_type="image")
-        attachment = {"type": "image", "payload": {"token": token}} if token else None
-        return attachment, url, "image"
-
-    def try_video():
-        url = fetch_pexels_video(video_keywords)
-        if not url:
-            return None, None, None
-        token = upload_media_and_get_token(url, media_type="video")
-        attachment = {"type": "video", "payload": {"token": token}} if token else None
-        return attachment, url, "video"
-
-    media_mode = rubric.get("media", "photo")
-
-    if media_mode == "video":
-        result = try_video()
-        return result if result[0] else try_photo()
-    if media_mode == "random":
-        if random.random() < 0.4:
-            result = try_video()
-            return result if result[0] else try_photo()
-        result = try_photo()
-        return result if result[0] else try_video()
-    return try_photo()
+    # 2) Pexels по статичным ключевым словам из rubrics.json.
+    photo_keywords = get_photo_keywords(rubric, weekday_index)
+    url = fetch_pexels_image(photo_keywords)
+    if not url:
+        return None, None, None
+    token = upload_media_and_get_token(url, media_type="image")
+    attachment = {"type": "image", "payload": {"token": token}} if token else None
+    return attachment, url, "image"
 
 
 def main():
@@ -779,9 +669,7 @@ def main():
         media_url = None
         media_type = None
         try:
-            media_attachment, media_url, media_type = fetch_and_upload_media(
-                rubric, weekday_index, post_text=text
-            )
+            media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index)
             if media_attachment:
                 attachments.append(media_attachment)
         except Exception as e:
@@ -811,9 +699,7 @@ def main():
                     )
                     telegram_text = telegram_common.adapt_text_for_telegram_local(text, hashtags)
                     tg_kwargs = {}
-                    if media_type == "video":
-                        tg_kwargs["video_url"] = media_url
-                    elif media_type == "image":
+                    if media_type == "image":
                         tg_kwargs["photo_url"] = media_url
                     tg_response = telegram_common.send_message(telegram_text, **tg_kwargs)
                     if tg_response.status_code == 200:
