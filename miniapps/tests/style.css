@@ -228,40 +228,37 @@ p {
    но остаётся в общей палитре сайта, а не выпадает из неё контрастом. */
 
 .actions-panel {
-  background: linear-gradient(135deg, var(--panel-bg-a), var(--panel-bg-b));
-  border-radius: var(--radius-lg);
-  padding: 16px;
   display: grid;
   gap: 10px;
-  box-shadow: var(--panel-shadow);
 }
 
 .panel-btn {
   display: block;
   width: 100%;
-  border: 1px solid var(--panel-chip-border);
-  border-radius: 13px;
-  padding: 13px 16px;
-  background: var(--panel-chip);
+  border: 0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, var(--panel-bg-a), var(--panel-bg-b));
   color: var(--panel-ink);
   font-size: 15px;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
   cursor: pointer;
-  backdrop-filter: blur(2px);
-  transition: background .15s ease, border-color .15s ease, transform .1s ease;
+  box-shadow: var(--panel-shadow);
+  transition: box-shadow .15s ease, transform .1s ease, filter .15s ease;
 }
 
 .panel-btn:hover {
-  background: var(--panel-chip-hover);
-  border-color: rgba(255, 255, 255, .45);
+  filter: brightness(1.06);
   transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(147, 64, 31, .32);
 }
 
 .panel-btn:active {
-  background: rgba(255, 255, 255, .18);
   transform: translateY(0);
+  filter: brightness(.97);
+  box-shadow: 0 4px 12px rgba(147, 64, 31, .24);
 }
 
 /* ---------- Состояния загрузки / ошибки ---------- */
