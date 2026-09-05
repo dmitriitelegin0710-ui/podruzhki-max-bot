@@ -2,8 +2,8 @@
    Палитра
    ========================================================================
    Тёплый кремовый фон + терракотовый акцент вместо фиолетово-розового.
-   Блок с доп. навигацией (панель) сделан отдельным тёмным элементом —
-   визуально явно отделён от карточки с вопросом.
+   Панель доп. навигации сделана тёплым терракотовым градиентом —
+   визуально выделена, но остаётся в общей палитре, без чёрного/розового.
 */
 :root {
   --bg: #f6f1e6;
@@ -16,10 +16,13 @@
   --accent-dark: #93401f;
   --accent-soft: #f5e3d8; /* мягкий терракотовый фон для выбранного варианта */
 
-  --panel-bg: #17241d;    /* тёмно-изумрудная панель для доп. кнопок */
-  --panel-ink: #f3efe4;
-  --panel-border: rgba(243, 239, 228, .16);
-  --panel-border-hover: rgba(243, 239, 228, .32);
+  --panel-bg-a: #e08a5c;  /* тёплый терракотовый градиент для панели действий */
+  --panel-bg-b: #b8502f;
+  --panel-ink: #fff6ec;
+  --panel-chip: rgba(255, 255, 255, .14);
+  --panel-chip-hover: rgba(255, 255, 255, .24);
+  --panel-chip-border: rgba(255, 255, 255, .30);
+  --panel-shadow: 0 8px 20px rgba(147, 64, 31, .28);
 
   --danger: #9a3030;
 
@@ -219,42 +222,46 @@ p {
   font-size: 30px;
 }
 
-/* ---------- Панель доп. навигации — отдельный тёмный блок ---------- */
-/* Намеренно контрастная относительно белой карточки: визуально выделяет
-   "служебные" переходы (другой тест, поделиться, назад в канал) как
-   отдельную зону, не связанную с самим вопросом. */
+/* ---------- Панель доп. навигации ---------- */
+/* Тёплый терракотовый градиент вместо тёмного/чёрного блока — панель
+   визуально выделена как "служебная" зона (другой тест, назад в канал),
+   но остаётся в общей палитре сайта, а не выпадает из неё контрастом. */
 
 .actions-panel {
-  background: var(--panel-bg);
+  background: linear-gradient(135deg, var(--panel-bg-a), var(--panel-bg-b));
   border-radius: var(--radius-lg);
   padding: 16px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  box-shadow: var(--panel-shadow);
 }
 
 .panel-btn {
   display: block;
   width: 100%;
-  border: 1px solid var(--panel-border);
+  border: 1px solid var(--panel-chip-border);
   border-radius: 13px;
   padding: 13px 16px;
-  background: transparent;
+  background: var(--panel-chip);
   color: var(--panel-ink);
   font-size: 15px;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
   cursor: pointer;
-  transition: background .15s ease, border-color .15s ease;
+  backdrop-filter: blur(2px);
+  transition: background .15s ease, border-color .15s ease, transform .1s ease;
 }
 
 .panel-btn:hover {
-  background: rgba(243, 239, 228, .07);
-  border-color: var(--panel-border-hover);
+  background: var(--panel-chip-hover);
+  border-color: rgba(255, 255, 255, .45);
+  transform: translateY(-1px);
 }
 
 .panel-btn:active {
-  background: rgba(243, 239, 228, .12);
+  background: rgba(255, 255, 255, .18);
+  transform: translateY(0);
 }
 
 /* ---------- Состояния загрузки / ошибки ---------- */
