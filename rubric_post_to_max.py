@@ -70,6 +70,14 @@ fetch_and_upload_media возвращает ещё и исходный URL ме�
 Комбинация выбирается детерминированно по дате (см.
 get_semeinye_istorii_topic_hint) — так же, как для рубрики "ezoterika".
 
+--- Рубрика "Личные финансы" (finansy) ---
+Раньше эта рубрика получала открытый topic_hint ('расскажи про накопления')
+и YandexGPT генерировал общие фразы без конкретики. Теперь, как и для
+ezoterika/semeinye_istorii, ей заранее подставляется конкретная комбинация
+(уровень дохода, финансовая цель, метод накопления) из
+content/finance_scenarios/finance_scenarios.json, с явным требованием
+привести реалистичные цифры — см. get_finansy_topic_hint.
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
   YANDEX_API_KEY, YANDEX_FOLDER_ID
@@ -105,6 +113,7 @@ PALMISTRY_FILE = "content/esoterics/palmistry.json"
 OMENS_FILE = "content/esoterics/omens.json"
 WOMEN_STORIES_FILE = "content/history_women_strong/women_success_stories.json"
 FAMILY_STORIES_FILE = "content/family_stories/story_contexts.json"
+FINANCE_SCENARIOS_FILE = "content/finance_scenarios/finance_scenarios.json"
 
 TESTS_MD_FILE = "miniapps/tests/test-001.md"
 TOTAL_TESTS = 24
@@ -188,9 +197,10 @@ def load_holidays() -> dict:
 
 def load_json_file(path: str):
     """Общий загрузчик для справочников рубрики «Эзотерика»
-    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json)
-    и для банка контекстов рубрики «Она мне рассказала»
-    (family_stories/story_contexts.json)."""
+    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json),
+    для банка контекстов рубрики «Она мне рассказала»
+    (family_stories/story_contexts.json) и для банка сценариев рубрики
+    «Личные финансы» (finance_scenarios/finance_scenarios.json)."""
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -391,6 +401,35 @@ def get_semeinye_istorii_topic_hint(target_date) -> str:
         f"Обязательный твист сюжета (открывается ближе к концу истории): {twist}.\n"
         f"Тип развязки: {resolution}.\n"
         "Заголовок истории должен быть интригующим и цеплять с первой фразы."
+    )
+
+
+def get_finansy_topic_hint(target_date) -> str:
+    """Рубрика «Личные финансы» — раньше GPT получал открытый промпт
+    ('расскажи про накопления') и генерировал общие фразы без конкретики.
+    Теперь, как и для ezoterika/semeinye_istorii, ему заранее подставляется
+    конкретная комбинация: уровень дохода, финансовая цель и метод
+    накопления — с явным требованием привести реалистичные цифры по
+    месяцам, а не советовать 'начните откладывать' общими словами.
+    Комбинация детерминированно зависит от даты."""
+    scenarios = load_json_file(FINANCE_SCENARIOS_FILE)
+    rng = random.Random(f"{target_date.isoformat()}-finansy")
+
+    income = rng.choice(scenarios["income_scenarios"])
+    goal = rng.choice(scenarios["money_goals"])
+    method = rng.choice(scenarios["methods"])
+
+    return (
+        "Опиши конкретный практический пример по личным финансам для женского "
+        "паблика. Используй строго следующие вводные:\n"
+        f"Ситуация: {income}.\n"
+        f"Финансовая цель: {goal}.\n"
+        f"Метод, который используется: {method}.\n"
+        "ОБЯЗАТЕЛЬНО приведи реалистичные ориентировочные цифры (сколько именно "
+        "откладывать в месяц или в неделю, за какой срок при таких вводных "
+        "получится достичь цели) — цифры должны логично соотноситься с "
+        "указанным доходом. НЕ используй общие фразы вроде «начните откладывать» "
+        "или «ведите бюджет» без конкретных чисел — цифры и есть суть поста."
     )
 
 
@@ -798,6 +837,15 @@ def main():
                     except Exception as e:
                         print(
                             f"Рубрика semeinye_istorii: не удалось подготовить контекст ({e}), "
+                            "публикую с topic_hint по умолчанию"
+                        )
+                elif rubric["key"] == "finansy":
+                    try:
+                        finansy_topic = get_finansy_topic_hint(now.date())
+                        active_rubric = {**rubric, "topic_hint": finansy_topic}
+                    except Exception as e:
+                        print(
+                            f"Рубрика finansy: не удалось подготовить контекст ({e}), "
                             "публикую с topic_hint по умолчанию"
                         )
                 text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
