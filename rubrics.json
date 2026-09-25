@@ -209,6 +209,19 @@
       ]
     },
     {
+      "key": "semeinye_istorii",
+      "time": "19:15",
+      "emoji": "👀",
+      "title": "Она мне рассказала",
+      "topic_hint": "ЗАГЛУШКА — реальный topic_hint для этой рубрики подставляется динамически функцией get_semeinye_istorii_topic_hint() перед вызовом YandexGPT, см. rubric_post_to_max.py. Значение здесь используется только если генерация контекста не удалась.",
+      "length": "story",
+      "site_link": null,
+      "photo_keywords": [
+        "sad woman window thinking emotional",
+        "woman looking out window contemplative"
+      ]
+    },
+    {
       "key": "vecherniy_ritual",
       "time": "20:00",
       "emoji": "🌙",
