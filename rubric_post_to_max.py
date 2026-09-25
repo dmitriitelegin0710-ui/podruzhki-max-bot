@@ -51,6 +51,14 @@ fetch_and_upload_media возвращает ещё и исходный URL ме�
 загрузки в MAX) и его тип (сейчас всегда "image") — нужно, чтобы то же
 самое медиа можно было отдельно скачать и отправить в Telegram.
 
+--- Рубрика "Она мне рассказала" (semeinye_istorii) ---
+Полностью вымышленные (не про реальных людей) бытовые истории в стиле
+"истории из жизни" — YandexGPT сочиняет текст не с нуля, а по детально
+заданной комбинации переменных из content/family_stories/story_contexts.json
+(героиня, город, триггер находки, источник конфликта, твист, тип развязки).
+Комбинация выбирается детерминированно по дате (см.
+get_semeinye_istorii_topic_hint) — так же, как для рубрики "ezoterika".
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
   YANDEX_API_KEY, YANDEX_FOLDER_ID
@@ -85,6 +93,7 @@ NUMEROLOGY_FILE = "content/esoterics/numerology.json"
 PALMISTRY_FILE = "content/esoterics/palmistry.json"
 OMENS_FILE = "content/esoterics/omens.json"
 WOMEN_STORIES_FILE = "content/history_women_strong/women_success_stories.json"
+FAMILY_STORIES_FILE = "content/family_stories/story_contexts.json"
 
 TESTS_MD_FILE = "miniapps/tests/test-001.md"
 TOTAL_TESTS = 24
@@ -144,6 +153,15 @@ LENGTH_INSTRUCTIONS = {
         "(вводит тему → раскрывает суть, при необходимости с пунктами через «•» → практический пример), "
         "в конце — короткий вывод. Абзацы разделяй пустой строкой."
     ),
+    "story": (
+        "Формат — история от первого лица на 150-220 слов, как рассказ подруге на кухне, "
+        "а не сухой пересказ. Структура: цепляющий заголовок-крючок (до 8 слов) → завязка "
+        "с конкретной бытовой деталью → развитие конфликта → твист → короткая развязка → "
+        "открытый вопрос к читательницам в самом конце, чтобы вызвать комментарии. "
+        "Используй конкретные бытовые детали (не «он изменился», а «стал завтракать в 6 утра, "
+        "хотя раньше вставал в 8»). Не используй клише вроде «жизнь такая штука» или "
+        "«как гром среди ясного неба». Абзацы разделяй пустой строкой."
+    ),
 }
 
 
@@ -159,7 +177,9 @@ def load_holidays() -> dict:
 
 def load_json_file(path: str):
     """Общий загрузчик для справочников рубрики «Эзотерика»
-    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json)."""
+    (tarot_deck_78.json, numerology.json, palmistry.json, omens.json)
+    и для банка контекстов рубрики «Она мне рассказала»
+    (family_stories/story_contexts.json)."""
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -328,6 +348,38 @@ def get_ezoterika_topic_hint(weekday_index: int, target_date) -> str:
         "Расскажи читательницам про эту народную примету в лёгком, развлекательном тоне. "
         "Строго используй только факт ниже, не выдумывай других примет:\n"
         f"Примета: «{item['sign']}» — {item['meaning']}"
+    )
+
+
+def get_semeinye_istorii_topic_hint(target_date) -> str:
+    """Рубрика «Она мне рассказала» — YandexGPT пишет полностью вымышленную
+    историю (никаких реальных людей и реальных источников), но не с нуля,
+    а по детально заданной комбинации переменных из
+    content/family_stories/story_contexts.json. Комбинация детерминированно
+    зависит от даты — воспроизводима в течение дня, меняется на следующий
+    (та же логика, что и в get_ezoterika_topic_hint)."""
+    contexts = load_json_file(FAMILY_STORIES_FILE)
+    rng = random.Random(f"{target_date.isoformat()}-semeinye_istorii")
+
+    heroine = rng.choice(contexts["heroines"])
+    city = rng.choice(contexts["cities"])
+    trigger = rng.choice(contexts["triggers"])
+    conflict = rng.choice(contexts["conflict_sources"])
+    twist = rng.choice(contexts["twists"])
+    resolution = rng.choice(contexts["resolution_types"])
+
+    return (
+        "Напиши полностью вымышленную (не про реальных людей) бытовую историю от первого "
+        "лица для женского паблика в стиле «истории из жизни» — интригующую, тёплую, "
+        "цепляющую, но без пошлости и без эротических деталей. Используй строго следующие "
+        "вводные, ничего похожего на реальных публичных людей не упоминай:\n"
+        f"Героиня: {heroine['name']}, {heroine['age']} лет, {heroine['job']}, живёт в городе "
+        f"типа «{city}».\n"
+        f"С чего началось: {trigger}.\n"
+        f"Источник конфликта: {conflict}.\n"
+        f"Обязательный твист сюжета (открывается ближе к концу истории): {twist}.\n"
+        f"Тип развязки: {resolution}.\n"
+        "Заголовок истории должен быть интригующим и цеплять с первой фразы."
     )
 
 
@@ -670,6 +722,15 @@ def main():
                     except Exception as e:
                         print(
                             f"Рубрика ezoterika: не удалось подготовить факт из JSON ({e}), "
+                            "публикую с topic_hint по умолчанию"
+                        )
+                elif rubric["key"] == "semeinye_istorii":
+                    try:
+                        story_topic = get_semeinye_istorii_topic_hint(now.date())
+                        active_rubric = {**rubric, "topic_hint": story_topic}
+                    except Exception as e:
+                        print(
+                            f"Рубрика semeinye_istorii: не удалось подготовить контекст ({e}), "
                             "публикую с topic_hint по умолчанию"
                         )
                 text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
