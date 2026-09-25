@@ -51,6 +51,17 @@ fetch_and_upload_media возвращает ещё и исходный URL ме�
 загрузки в MAX) и его тип (сейчас всегда "image") — нужно, чтобы то же
 самое медиа можно было отдельно скачать и отправить в Telegram.
 
+--- Рубрика "Маникюр дня" (manikur) ---
+Рубрика с "media_type": "video" в rubrics.json. Вместо фото к посту
+прикрепляется короткое вертикальное видео с Pexels (Pexels Video API),
+подобранное по video_keywords_by_season — статичным ключевым словам под
+текущее время года (см. get_video_keywords/fetch_pexels_video). Текст к
+видео короткий и генерируется YandexGPT как обычно, с учётом даты и сезона
+(они и так передаются в каждый вызов generate_text). Собственная база фото
+(photo_bank) для этой рубрики не используется — она поддерживает только
+фото. В Telegram (если настроен) для этой рубрики уходит только текст, без
+видео — video_url туда пока не прокидывается, см. main().
+
 --- Рубрика "Она мне рассказала" (semeinye_istorii) ---
 Полностью вымышленные (не про реальных людей) бытовые истории в стиле
 "истории из жизни" — YandexGPT сочиняет текст не с нуля, а по детально
@@ -580,6 +591,48 @@ def fetch_pexels_image(keywords: list):
     return None
 
 
+def fetch_pexels_video(keywords: list):
+    """Аналог fetch_pexels_image, но для рубрик с media_type='video'
+    (сейчас — «Маникюр дня»). Пробует ключевые слова по очереди, как заданы
+    в rubrics.json. Из найденных роликов предпочитает вертикальные (для
+    портретной ориентации в MAX) и самое компактное качество ('sd'), чтобы
+    не грузить в MAX слишком тяжёлые файлы."""
+    if not keywords or not PEXELS_API_KEY:
+        return None
+    for keyword in keywords:
+        try:
+            resp = requests.get(
+                "https://api.pexels.com/videos/search",
+                params={"query": keyword, "per_page": 10, "orientation": "portrait"},
+                headers={"Authorization": PEXELS_API_KEY},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            videos = resp.json().get("videos") or []
+            if not videos:
+                print(f"Pexels video: по запросу '{keyword}' ничего не нашлось, пробую следующее слово")
+                continue
+            video = random.choice(videos[:5])
+            video_files = video.get("video_files", [])
+            if not video_files:
+                continue
+            vertical_files = [f for f in video_files if f.get("height", 0) > f.get("width", 0)]
+            candidates = vertical_files or video_files
+            sd_candidates = [f for f in candidates if f.get("quality") == "sd"] or candidates
+            chosen = min(sd_candidates, key=lambda f: f.get("width") or 9999)
+            return chosen.get("link")
+        except Exception as e:
+            print(f"Pexels video: ошибка запроса ({keyword}) — {e}")
+    return None
+
+
+def get_video_keywords(rubric: dict, season: str):
+    by_season = rubric.get("video_keywords_by_season")
+    if by_season:
+        return by_season.get(season, [])
+    return rubric.get("video_keywords", [])
+
+
 def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     meta_resp = requests.post(
         f"{API_BASE}/uploads",
@@ -592,7 +645,7 @@ def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     upload_url = meta["url"]
     token = meta.get("token")
 
-    media_bytes = requests.get(media_url, timeout=120).content
+    media_bytes = requests.get(media_url, timeout=180).content
     filename = "video.mp4" if media_type == "video" else "image.jpg"
     files = {"data": (filename, media_bytes)}
     upload_resp = requests.post(upload_url, files=files, timeout=180)
@@ -636,17 +689,31 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
     return rubric.get("photo_keywords", [])
 
 
-def fetch_and_upload_media(rubric: dict, weekday_index: int):
-    """Готовит фото-вложение для поста в MAX.
+def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None):
+    """Готовит медиа-вложение для поста в MAX.
     Возвращает кортеж (attachment, media_url, media_type) — media_url и
-    media_type ("image") нужны, чтобы то же самое медиа можно было
-    отдельно отправить в Telegram через telegram_common.py.
+    media_type ("image" или "video") нужны, чтобы то же самое медиа можно
+    было отдельно отправить в Telegram через telegram_common.py.
 
-    Порядок: сначала собственная база (photo_bank.get_own_photo), затем
-    Pexels по статичным ключевым словам из rubrics.json. Никакого
-    обращения к YandexGPT здесь больше нет — раньше отдельный вызов на
-    подбор ключевых слов срабатывал ДАЖЕ когда своя база уже покрывала
-    рубрику, впустую тратя токены. Видео-вложения убраны полностью."""
+    Для рубрик с "media_type": "video" в rubrics.json (сейчас — «Маникюр
+    дня») медиа берётся через Pexels Video API по video_keywords_by_season,
+    БЕЗ обращения к собственной базе фото (photo_bank поддерживает только
+    фото) и без вызова YandexGPT для подбора слов.
+
+    Для всех остальных рубрик — прежний порядок: сначала собственная база
+    (photo_bank.get_own_photo), затем Pexels по статичным ключевым словам
+    из rubrics.json. Никакого обращения к YandexGPT здесь нет — раньше
+    отдельный вызов на подбор ключевых слов срабатывал ДАЖЕ когда своя база
+    уже покрывала рубрику, впустую тратя токены."""
+
+    if rubric.get("media_type") == "video":
+        video_keywords = get_video_keywords(rubric, season)
+        url = fetch_pexels_video(video_keywords)
+        if not url:
+            return None, None, None
+        token = upload_media_and_get_token(url, media_type="video")
+        attachment = {"type": "video", "payload": {"token": token}} if token else None
+        return attachment, url, "video"
 
     # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
     try:
@@ -748,7 +815,7 @@ def main():
         media_url = None
         media_type = None
         try:
-            media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index)
+            media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index, season)
             if media_attachment:
                 attachments.append(media_attachment)
         except Exception as e:
