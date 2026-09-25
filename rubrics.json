@@ -71,17 +71,21 @@
       ]
     },
     {
-      "key": "layfhak",
+      "key": "manikur",
       "time": "09:00",
-      "emoji": "🏠",
-      "title": "Лайфхак для дома",
-      "topic_hint": "Один практичный бытовой лайфхак (уборка, хранение, организация пространства) с пошаговым объяснением, почему это работает.Структурировано,с абзацами,можно с эмодзи",
-      "length": "medium",
+      "emoji": "💅",
+      "title": "Маникюр дня",
+      "topic_hint": "Короткий вдохновляющий пост с одной конкретной идеей стильного маникюра, актуального для текущего времени года (см. дату и сезон выше — не бери другой сезон). Опиши цвет, технику или декор одного варианта дизайна живым тоном, как будто делишься классной находкой с подругой. Не описывай видео дословно и не упоминай, что это видео — просто вдохнови на идею маникюра.",
+      "length": "short",
       "site_link": null,
       "days": [1, 2, 3, 4, 6],
-      "photo_keywords": [
-        "cozy home organization tips"
-      ]
+      "media_type": "video",
+      "video_keywords_by_season": {
+        "зима": ["winter nail art manicure", "elegant nails close up"],
+        "весна": ["spring nail art manicure", "pastel nails close up"],
+        "лето": ["summer nail art manicure", "bright nails close up"],
+        "осень": ["autumn nail art manicure", "trendy nails close up"]
+      }
     },
     {
       "key": "psy_otnosheniya",
