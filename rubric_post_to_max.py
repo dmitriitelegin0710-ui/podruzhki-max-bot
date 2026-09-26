@@ -573,6 +573,32 @@ def clean_formatting(text: str) -> str:
     return text.strip()
 
 
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002700-\U000027BF"
+    "\U0001F900-\U0001F9FF"
+    "\U00002B00-\U00002BFF"
+    "\U0000FE0F"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def strip_emoji(text: str) -> str:
+    """Для рубрик с 'no_emoji': true в rubrics.json (сейчас — «Маникюр дня»).
+    Программная подстраховка на случай, если модель проигнорирует
+    текстовую инструкцию 'не используй эмодзи' в topic_hint (нередко
+    бывает с лёгкими моделями вроде yandexgpt-lite) — убирает эмодзи уже
+    из готового текста, а не полагается только на промпт."""
+    text = EMOJI_PATTERN.sub('', text)
+    text = re.sub(r'[ \t]{2,}', ' ', text)
+    text = re.sub(r'\n[ \t]+', '\n', text)
+    return text.strip()
+
+
 def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str) -> str:
     length_key = rubric.get("length", "medium")
     length_instruction = LENGTH_INSTRUCTIONS.get(length_key, LENGTH_INSTRUCTIONS["medium"])
@@ -600,7 +626,10 @@ def generate_text(rubric: dict, weekday_name: str, date_human: str, season: str)
     resp.raise_for_status()
     data = resp.json()
     raw_text = data["result"]["alternatives"][0]["message"]["text"].strip()
-    return clean_formatting(raw_text)
+    cleaned = clean_formatting(raw_text)
+    if rubric.get("no_emoji"):
+        cleaned = strip_emoji(cleaned)
+    return cleaned
 
 
 def fetch_pexels_image(keywords: list):
@@ -633,16 +662,22 @@ def fetch_pexels_image(keywords: list):
 def fetch_pexels_video(keywords: list):
     """Аналог fetch_pexels_image, но для рубрик с media_type='video'
     (сейчас — «Маникюр дня»). Пробует ключевые слова по очереди, как заданы
-    в rubrics.json. Из найденных роликов предпочитает вертикальные (для
-    портретной ориентации в MAX) и самое компактное качество ('sd'), чтобы
-    не грузить в MAX слишком тяжёлые файлы."""
+    в rubrics.json.
+
+    ВАЖНО: раньше запрос шёл с жёстким параметром orientation=portrait —
+    для нишевых запросов вроде 'маникюр крупным планом' Pexels мог просто
+    не находить ни одного вертикального ролика и возвращать пустой список,
+    из-за чего видео молча не прикреплялось. Теперь запрос идёт БЕЗ
+    фильтра по ориентации (шире пул результатов), а вертикальные ролики
+    только предпочитаются при выборе среди уже найденных — если их нет,
+    берётся любой найденный, лишь бы видео вообще прикрепилось."""
     if not keywords or not PEXELS_API_KEY:
         return None
     for keyword in keywords:
         try:
             resp = requests.get(
                 "https://api.pexels.com/videos/search",
-                params={"query": keyword, "per_page": 10, "orientation": "portrait"},
+                params={"query": keyword, "per_page": 15},
                 headers={"Authorization": PEXELS_API_KEY},
                 timeout=20,
             )
@@ -651,15 +686,29 @@ def fetch_pexels_video(keywords: list):
             if not videos:
                 print(f"Pexels video: по запросу '{keyword}' ничего не нашлось, пробую следующее слово")
                 continue
+
+            print(f"Pexels video: по запросу '{keyword}' найдено роликов: {len(videos)}")
             video = random.choice(videos[:5])
             video_files = video.get("video_files", [])
             if not video_files:
+                print(f"Pexels video: у ролика {video.get('id')} нет video_files, пробую другое слово")
                 continue
+
             vertical_files = [f for f in video_files if f.get("height", 0) > f.get("width", 0)]
             candidates = vertical_files or video_files
+            if not vertical_files:
+                print(
+                    f"Pexels video: у ролика {video.get('id')} нет вертикальных файлов, "
+                    "беру горизонтальный вариант"
+                )
             sd_candidates = [f for f in candidates if f.get("quality") == "sd"] or candidates
             chosen = min(sd_candidates, key=lambda f: f.get("width") or 9999)
-            return chosen.get("link")
+            link = chosen.get("link")
+            print(
+                f"Pexels video: выбран файл {link} "
+                f"({chosen.get('width')}x{chosen.get('height')}, quality={chosen.get('quality')})"
+            )
+            return link
         except Exception as e:
             print(f"Pexels video: ошибка запроса ({keyword}) — {e}")
     return None
@@ -747,11 +796,21 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None)
 
     if rubric.get("media_type") == "video":
         video_keywords = get_video_keywords(rubric, season)
+        print(f"Маникюр: ищу видео по ключевым словам {video_keywords} (сезон: {season})")
         url = fetch_pexels_video(video_keywords)
         if not url:
+            print("Маникюр: видео не найдено ни по одному ключевому слову, публикую без видео")
             return None, None, None
-        token = upload_media_and_get_token(url, media_type="video")
-        attachment = {"type": "video", "payload": {"token": token}} if token else None
+        try:
+            token = upload_media_and_get_token(url, media_type="video")
+        except Exception as e:
+            print(f"Маникюр: ошибка при загрузке видео в MAX — {e}, публикую без видео")
+            return None, None, None
+        if not token:
+            print("Маникюр: MAX не вернул token для видео, публикую без видео")
+            return None, None, None
+        print(f"Маникюр: видео успешно загружено в MAX, token получен")
+        attachment = {"type": "video", "payload": {"token": token}}
         return attachment, url, "video"
 
     # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
