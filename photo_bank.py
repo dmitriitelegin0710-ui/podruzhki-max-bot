@@ -147,6 +147,10 @@ def get_own_photo(rubric_key: str, weekday_index: int = None):
         return None
 
     if not candidates:
+        print(
+            f"Своя база фото: подключение к бакету работает, но для рубрики "
+            f"'{rubric_key}' в папке {YC_BUCKET_PREFIX}/{rubric_key}/ пока нет фото — иду в Pexels"
+        )
         return None
 
     state = _load_json(PHOTO_BANK_STATE_FILE, {})
