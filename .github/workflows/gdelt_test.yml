@@ -1,4 +1,4 @@
-name: GDELT News Test
+name: RSS News Test
 
 on:
   workflow_dispatch:
@@ -19,24 +19,15 @@ jobs:
       - name: Установить зависимости
         run: pip install -r requirements.txt
 
-      - name: Запустить поиск GDELT
-        run: python news/gdelt_search.py
+      - name: Запустить сбор новостей из RSS
+        run: python news/rss_search.py
 
-      - name: Показать содержимое articles.json
+      - name: Показать содержимое filtered_articles.json
         run: |
-          echo "===== ARTICLES.JSON ====="
-          head -c 12000 news/articles.json
+          echo "===== FILTERED_ARTICLES.JSON ====="
+          head -c 12000 news/filtered_articles.json
           echo
           echo "===== END ====="
-
-      - name: Отфильтровать статьи
-        run: python news/filter_articles.py
-
-      - name: Сохранить articles.json
-        uses: actions/upload-artifact@v4
-        with:
-          name: gdelt-articles
-          path: news/articles.json
 
       - name: Сохранить отфильтрованные статьи
         uses: actions/upload-artifact@v4
