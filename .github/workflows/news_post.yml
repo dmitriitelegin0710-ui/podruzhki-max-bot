@@ -46,10 +46,8 @@ jobs:
           sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_root_ca.crt https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt
           sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt
           sudo update-ca-certificates
-      - name: Собрать статьи из GDELT
-        run: python news/gdelt_search.py
-      - name: Отфильтровать статьи
-        run: python news/filter_articles.py
+      - name: Собрать статьи из тех же RSS-источников, что и сайт
+        run: python news/rss_search.py
       - name: Рерайт и публикация в MAX и Telegram
         run: python news/rewrite_and_post.py
         env:
