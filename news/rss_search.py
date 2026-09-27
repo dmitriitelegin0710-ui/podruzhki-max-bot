@@ -27,6 +27,10 @@ OUTPUT_FILE = Path("news/filtered_articles.json")
 
 # Те же ленты, что использует сайт (см. import_rss.py). Держите этот
 # список в синхроне вручную, если на сайте появятся новые источники.
+# Те же ленты, что использует сайт (см. import_rss.py). Держите этот
+# список в синхроне вручную, если на сайте появятся новые источники.
+# Положительный фильтр по темам (ниже, AUDIENCE_TOPIC_*) теперь общий
+# для всех лент — отдельного списка ключевых слов на ленту больше нет.
 RSS_FEEDS = [
     {
         "url": "https://www.starhit.ru/rss/",
@@ -37,15 +41,6 @@ RSS_FEEDS = [
         "url": "https://www.eg.ru/rss.xml",
         "source_name": "Экспресс газета",
         "limit": 15,
-        "keywords": [
-            "звезд", "знаменит", "селебрити", "светск",
-            "актрис", "актер", "актёр", "певиц", "певец", "артист",
-            "блогер", "шоу-бизнес", "шоубизнес", "шоу бизнес",
-            "скандал", "развод", "роман", "слух", "измен",
-            "папарац", "экс-муж", "экс-жена", "бывш",
-            "беремен", "родила", "родил", "свадьб", "помолвк",
-            "принц", "принцесс", "королев", "монарх",
-        ],
     },
 ]
 
@@ -173,6 +168,105 @@ WAR_UKRAINE_POLITICS_WHOLE_WORDS = [
     "сво",
 ]
 
+# --- Положительный фильтр: темы, которые реально интересны аудитории ---
+# Мало того, что новость "про шоу-биз" в широком смысле (это уже
+# гарантируют сами источники — StarHit и eg.ru) — нужно, чтобы она была
+# ещё и про то, что цепляет женскую аудиторию: отношения, семья, внешность
+# и личные переживания знаменитостей, а не любой инфоповод с их участием
+# (например, "кто-то купил квартиру" сам по себе в эту категорию не
+# попадает, если рядом нет ничего про отношения/семью/внешность).
+# Достаточно ОДНОГО совпадения в заголовке ИЛИ в тексте — новости обычно
+# короткие, и требовать несколько совпадений было бы слишком строго.
+AUDIENCE_TOPIC_STEMS = [
+    # Отношения
+    "роман",            # роман, романтическ (стем длинный, "Романов" почти
+                         # не встречается в шоу-биз лентах — риск принят)
+    "отношени",
+    "влюб",
+    "жених",
+    "невест",
+    "помолвк",
+    "свадьб",
+    "развод",
+    "измен",
+    "расста",           # рассталась, расставание
+    "воссоедин",
+    "бойфренд",
+    "возлюбл",
+    "экс-муж",
+    "экс-жена",
+    "бывш",
+    "любовник",
+    "любовниц",
+
+    # Семья / дети
+    "беремен",
+    "родила",
+    "родил",
+    "рожа",             # рожает, рожала, рожать — форма, которую не ловит "родил"
+    "декрет",
+    "ребен",
+    "ребён",
+    "дочь",
+    "сын",
+    "дети",
+    "материнств",
+    "отцовств",
+    "супруг",
+    "муж",              # длинный контекст статей шоу-биза снижает риск
+                         # ложного срабатывания на "мужчина"/"мужество"
+    "жена",
+    "семь",              # семья, семейный
+
+    # Внешность / стиль
+    "похудел",
+    "поправил",
+    "пластик",
+    "операц",           # чаще всего "пластическая операция" в этом контексте
+    "диет",
+    "наряд",
+    "плать",
+    "макияж",
+    "стрижк",
+    "ботокс",
+    "фотосесс",
+    "купальник",
+    "внешност",
+    "похорошел",
+
+    # Личные откровения / эмоции
+    "призналась",
+    "признался",
+    "откровени",
+    "расплакалась",
+    "расплакался",
+    "пожаловалась",
+    "пожаловался",
+    "переживает",
+
+    # Скандалы/слухи вокруг личной жизни (не путать с политическими скандалами —
+    # те уже отсечены WAR_UKRAINE_POLITICS_STEMS выше)
+    "скандал",
+    "слух",
+    "компромат",
+    "разоблачени",
+]
+
+AUDIENCE_TOPIC_WHOLE_WORDS = [
+    "секс",
+]
+
+# Стемы, которым нужен более точный regex вручную — обычный левый стем
+# случайно ловит совсем другую тему:
+#   "фигур" без уточнения совпадает с "фигурным катанием" (спорт);
+#   "образ" без уточнения совпадает с "образованием"/"образец".
+# Negative lookahead исключает именно эти конкретные слова, оставляя
+# "фигура/фигуры/фигурой" (тело) и "образ/образа/образом" (стиль).
+AUDIENCE_TOPIC_CUSTOM_PATTERNS = [
+    re.compile(r"\bфигур(?!н)"),
+    re.compile(r"\bобраз(?!ован|ец)"),
+]
+
 
 def _compile_stems(words):
     """Границы слова только слева — ловит любые падежи и суффиксы."""
@@ -191,6 +285,11 @@ DEATH_ILLNESS_PATTERNS = (
 WAR_UKRAINE_POLITICS_PATTERNS = (
     _compile_stems(WAR_UKRAINE_POLITICS_STEMS)
     + _compile_whole_words(WAR_UKRAINE_POLITICS_WHOLE_WORDS)
+)
+AUDIENCE_TOPIC_PATTERNS = (
+    _compile_stems(AUDIENCE_TOPIC_STEMS)
+    + _compile_whole_words(AUDIENCE_TOPIC_WHOLE_WORDS)
+    + AUDIENCE_TOPIC_CUSTOM_PATTERNS
 )
 
 # Максимум статей суммарно по всем лентам, которые попадут в
@@ -242,14 +341,6 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower().replace("ё", "е")).strip()
 
 
-def matches_keywords(title, text, keywords) -> bool:
-    """Простое substring-совпадение — используется только для
-    ПОЛОЖИТЕЛЬНОГО фильтра (per-feed 'keywords'), где ложное срабатывание
-    не страшно так, как в стоп-списках."""
-    haystack = f"{title} {text}".lower()
-    return any(keyword.lower() in haystack for keyword in keywords)
-
-
 def matches_patterns(text: str, patterns) -> bool:
     return any(p.search(text) for p in patterns)
 
@@ -264,6 +355,14 @@ def is_excluded(title, text) -> bool:
     if matches_patterns(haystack, WAR_UKRAINE_POLITICS_PATTERNS):
         return True
     return False
+
+
+def is_audience_relevant(title, text) -> bool:
+    """Положительный фильтр: статья должна быть не просто 'про шоу-биз',
+    а именно про отношения/семью/внешность/личные переживания — то, что
+    реально интересно женской аудитории. Одного совпадения достаточно."""
+    haystack = normalize(f"{title} {text}")
+    return matches_patterns(haystack, AUDIENCE_TOPIC_PATTERNS)
 
 
 def entry_date_iso(entry) -> str:
@@ -284,7 +383,6 @@ def fetch_feed(feed_config: dict) -> list:
     url = feed_config["url"]
     source_name = feed_config["source_name"]
     limit = feed_config.get("limit", 15)
-    keywords = feed_config.get("keywords")
 
     print(f"Читаю ленту: {source_name} ({url})")
     try:
@@ -300,6 +398,8 @@ def fetch_feed(feed_config: dict) -> list:
     print(f"  Всего записей в ленте: {len(feed.entries)}")
 
     articles = []
+    excluded_count = 0
+    off_topic_count = 0
     for entry in feed.entries[:limit]:
         title = entry.get("title", "").strip()
         source_url = entry.get("link", "")
@@ -309,8 +409,10 @@ def fetch_feed(feed_config: dict) -> list:
         text = find_text(entry)
 
         if is_excluded(title, text):
+            excluded_count += 1
             continue
-        if keywords and not matches_keywords(title, text, keywords):
+        if not is_audience_relevant(title, text):
+            off_topic_count += 1
             continue
 
         articles.append({
@@ -322,7 +424,9 @@ def fetch_feed(feed_config: dict) -> list:
             "image_url": find_image_url(entry),
         })
 
-    print(f"  Прошло фильтр: {len(articles)}")
+    print(f"  Прошло фильтр: {len(articles)} "
+          f"(отсеяно тяжёлыми/политикой: {excluded_count}, "
+          f"не по теме аудитории: {off_topic_count})")
     return articles
 
 
