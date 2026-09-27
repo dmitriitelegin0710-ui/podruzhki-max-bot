@@ -40,10 +40,10 @@ jobs:
           YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
           MAX_BOT_USERNAME: ${{ secrets.MAX_BOT_USERNAME }}
-          # НОВОЕ: публикация в Telegram-канал опциональна — если эти два
-          # секрета не заданы в репозитории, telegram_common.is_configured()
-          # вернёт False и rubric_post_to_max.py просто пропустит публикацию
-          # туда, ничего не сломав в шаге для MAX.
+          # Публикация в Telegram-канал опциональна — если эти два секрета
+          # не заданы в репозитории, telegram_common.is_configured() вернёт
+          # False и rubric_post_to_max.py просто пропустит публикацию туда,
+          # ничего не сломав в шаге для MAX.
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
@@ -51,10 +51,42 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if [ -f posted_rubrics.json ]; then
-            git add posted_rubrics.json
-            git diff --staged --quiet || git commit -m "Обновлён журнал опубликованных рубрик"
-            git push
-          else
+
+          if [ ! -f posted_rubrics.json ]; then
             echo "posted_rubrics.json ещё не создан — сохранять нечего"
+            exit 0
           fi
+
+          git add posted_rubrics.json
+
+          if git diff --staged --quiet; then
+            echo "Изменений нет — коммитить нечего"
+            exit 0
+          fi
+
+          git commit -m "Обновлён журнал опубликованных рубрик"
+
+          # УСТОЙЧИВОСТЬ К ГОНКАМ: concurrency выше защищает только от
+          # параллельных запусков ЭТОГО ЖЕ workflow, но не от любого другого
+          # коммита в main, случившегося между checkout и этим push (ручная
+          # правка файла на GitHub, другой workflow и т.п.). Раньше при
+          # такой гонке git push падал с "fetch first" и весь запуск
+          # завершался ошибкой, хотя публикация в MAX уже прошла успешно —
+          # терялась только галочка "опубликовано" в журнале, что грозило
+          # дублем поста на следующем запуске.
+          #
+          # Теперь при неудаче подтягиваем свежий main (--rebase переносит
+          # наш локальный коммит поверх новых чужих изменений) и пробуем
+          # запушить снова, до 5 раз с небольшой паузой.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "Журнал успешно сохранён (попытка $attempt)"
+              exit 0
+            fi
+            echo "Push не прошёл (попытка $attempt из 5) — подтягиваю свежий main и пробую снова"
+            git pull --rebase origin main
+            sleep 5
+          done
+
+          echo "::error::Не удалось запушить журнал опубликованных рубрик после 5 попыток"
+          exit 1
