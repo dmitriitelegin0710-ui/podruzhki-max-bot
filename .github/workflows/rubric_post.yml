@@ -25,7 +25,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Установить зависимости
-        run: pip install requests pytz
+        # Раньше зависимости ставились вручную ("pip install requests
+        # pytz") в обход requirements.txt — из-за этого boto3 (нужен
+        # photo_bank.py для доступа к бакету Yandex Object Storage) тут
+        # не появился бы, даже если его добавить в requirements.txt.
+        # Теперь ставим всё из requirements.txt, как и в news_post.yml.
+        run: pip install -r requirements.txt pytz
       - name: Установить российский сертификат Минцифры (нужен для доступа к platform-api2.max.ru)
         run: |
           sudo curl -sk -o /usr/local/share/ca-certificates/russian_trusted_root_ca.crt https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt
@@ -40,6 +45,14 @@ jobs:
           YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
           MAX_BOT_USERNAME: ${{ secrets.MAX_BOT_USERNAME }}
+          # Доступ к бакету Yandex Object Storage (liftdocs-files) со
+          # своей базой фото под рубрики — см. photo_bank.py. Пока эти
+          # два секрета не заданы (или папка рубрики в бакете ещё
+          # пустая), photo_bank.get_own_photo() просто вернёт None и
+          # rubric_post_to_max.py как и раньше возьмёт фото с Pexels —
+          # ничего не ломается.
+          YC_ACCESS_KEY_ID: ${{ secrets.YC_ACCESS_KEY_ID }}
+          YC_SECRET_ACCESS_KEY: ${{ secrets.YC_SECRET_ACCESS_KEY }}
           # Публикация в Telegram-канал опциональна — если эти два секрета
           # не заданы в репозитории, telegram_common.is_configured() вернёт
           # False и rubric_post_to_max.py просто пропустит публикацию туда,
@@ -47,24 +60,27 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
-      - name: Сохранить журнал опубликованных рубрик
+      - name: Сохранить журнал опубликованных рубрик и состояние ротации фото
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ ! -f posted_rubrics.json ]; then
-            echo "posted_rubrics.json ещё не создан — сохранять нечего"
-            exit 0
-          fi
-
-          git add posted_rubrics.json
+          # Оба файла необязательны на первом запуске (posted_rubrics.json
+          # появляется после первой успешной публикации, photo_bank_state.json —
+          # после первого взятия фото из своей базы в бакете) — добавляем
+          # в коммит только то, что реально существует.
+          for f in posted_rubrics.json photo_bank_state.json; do
+            if [ -f "$f" ]; then
+              git add "$f"
+            fi
+          done
 
           if git diff --staged --quiet; then
             echo "Изменений нет — коммитить нечего"
             exit 0
           fi
 
-          git commit -m "Обновлён журнал опубликованных рубрик"
+          git commit -m "Обновлён журнал опубликованных рубрик и состояние ротации фото"
 
           # УСТОЙЧИВОСТЬ К ГОНКАМ: concurrency выше защищает только от
           # параллельных запусков ЭТОГО ЖЕ workflow, но не от любого другого
