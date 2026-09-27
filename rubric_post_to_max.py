@@ -734,9 +734,23 @@ def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     token = meta.get("token")
 
     media_bytes = requests.get(media_url, timeout=180).content
-    filename = "video.mp4" if media_type == "video" else "image.jpg"
-    files = {"data": (filename, media_bytes)}
+    if media_type == "video":
+        filename = "video.mp4"
+        content_type = "video/mp4"
+    else:
+        filename = "image.jpg"
+        content_type = "image/jpeg"
+    # ВАЖНО: раньше Content-Type части формы не указывался явно (requests
+    # сам решал, что подставить) — для фото это работало, но видео-загрузка
+    # на окcdn.ru (инфраструктура MAX для видео) вернула 400 без явного
+    # Content-Type. Указываем его прямо третьим элементом кортежа.
+    files = {"data": (filename, media_bytes, content_type)}
     upload_resp = requests.post(upload_url, files=files, timeout=180)
+    if upload_resp.status_code >= 400:
+        # Печатаем тело ответа СРАЗУ, до raise_for_status() — там обычно
+        # написана точная причина отказа сервера (неверное поле, лимит
+        # размера и т.п.), а не только код статуса.
+        print(f"Загрузка медиа в MAX: сервер ответил {upload_resp.status_code} — {upload_resp.text[:500]}")
     upload_resp.raise_for_status()
 
     if not token:
