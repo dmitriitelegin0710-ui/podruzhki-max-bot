@@ -1,24 +1,32 @@
 """
 Рерайт новостей шоу-бизнеса через YandexGPT и публикация в MAX + Telegram.
 
-Читает news/filtered_articles.json (результат gdelt_search.py + filter_articles.py),
-пропускает уже опубликованные (news/posted_news.json), для новых —
-переписывает текст через YandexGPT (своими словами, без копирования
-чужого текста) и публикует в MAX через max_common.py, а если настроен
-Telegram (см. telegram_common.py в корне репозитория) — публикует туда
-тот же пост с добавленными хэштегами (см. ниже) — без повторного
-обращения к YandexGPT.
+Читает news/filtered_articles.json (результат rss_search.py), пропускает
+уже опубликованные (news/posted_news.json), для новых — переписывает
+текст через YandexGPT (своими словами, без копирования чужого текста) и
+публикует в MAX через max_common.py, а если настроен Telegram (см.
+telegram_common.py в корне репозитория) — публикует туда тот же пост с
+добавленными хэштегами (см. ниже) — без повторного обращения к YandexGPT.
 
-Фото: сначала пробуем реальное фото статьи-источника (image_url, извлечённое
-в gdelt_search.py из og:image) — оно соответствует новости, но это чужая
-редакционная фотография без явных прав на переиспользование (сознательно
-принятый риск). Если фото у статьи нет — раньше подставлялось случайное
-стоковое фото с Pexels по одному из 4 общих "гламурных" слов, независимо
-от того, о чём вообще новость. ИЗМЕНЕНО: теперь сначала отдельным лёгким
-запросом к YandexGPT (generate_photo_keywords) по уже переписанному тексту
-поста подбираются 2-3 английских ключевых слова, которые точно описывают
-СМЫСЛ именно этой новости — и только если по ним ничего не нашлось на
-Pexels, используются старые общие "гламурные" слова как запасной вариант.
+--- Режим предпросмотра (DRY_RUN) ---
+Если переменная окружения DRY_RUN установлена в "true"/"1"/"yes" — скрипт
+делает всё как обычно (рерайт текста через YandexGPT, подбор фото), но
+ОСТАНАВЛИВАЕТСЯ прямо перед загрузкой фото в MAX и отправкой сообщения:
+готовый текст поста и адрес картинки печатаются в лог, ни в MAX, ни в
+Telegram ничего не уходит, и статья НЕ помечается как опубликованная в
+posted_news.json — так что при следующем обычном запуске (без DRY_RUN)
+эта же статья снова будет доступна для настоящей публикации.
+Удобно, чтобы посмотреть, что именно уйдёт в канал, не тратя реальный
+пост на проверку.
+
+Фото: сначала пробуем реальное фото статьи-источника (image_url, взятое
+из RSS-ленты) — оно соответствует новости, но это чужая редакционная
+фотография без явных прав на переиспользование (сознательно принятый
+риск). Если фото у статьи нет — сначала отдельным лёгким запросом к
+YandexGPT (generate_photo_keywords) по уже переписанному тексту поста
+подбираются 2-3 английских ключевых слова, которые точно описывают СМЫСЛ
+именно этой новости — и только если по ним ничего не нашлось на Pexels,
+используются старые общие "гламурные" слова как запасной вариант.
 
 За один запуск публикует не больше POSTS_PER_RUN новостей — сейчас 1,
 расписание в news_post.yml вызывает скрипт несколько раз в день, чтобы
@@ -64,6 +72,7 @@ import os
 import random
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -93,7 +102,31 @@ YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 
 POSTS_PER_RUN = 1
 # Сколько кандидатов из очереди готовы попробовать за один запуск.
-MAX_ATTEMPTS_PER_RUN = 5
+MAX_ATTEMPTS_PER_RUN = 8
+
+# --- Слоты публикации (по московскому времени) ---
+# Workflow запускается несколько раз в окрестности каждого слота (см.
+# news_post.yml), а сам скрипт решает, пора ли публиковать: слот "созрел",
+# если его время уже наступило, но прошло не больше SLOT_MAX_LATE_MINUTES
+# и новость на этот слот ещё не выходила. Так один пропущенный или
+# задержанный GitHub'ом запуск по расписанию не приводит к потере новости —
+# следующий запуск догонит (та же идея, что и в rubric_post_to_max.py).
+# Москва не переходит на летнее время, поэтому фиксированный UTC+3.
+MSK = timezone(timedelta(hours=3))
+NEWS_SLOTS = ["09:05", "13:15", "17:25"]
+SLOT_MAX_LATE_MINUTES = 120   # последний слот 17:25 → не позже 19:25, до вечернего ритуала 20:20
+SLOTS_STATE_FILE = Path("news/posted_news_slots.json")
+# При ручном запуске (кнопка Run workflow) слоты игнорируются — публикуем сразу.
+IS_MANUAL_RUN = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+
+# Итоги попытки опубликовать одну статью.
+RESULT_POSTED = "posted"     # опубликовано
+RESULT_REFUSED = "refused"   # YandexGPT отказался переписывать — повторять бессмысленно
+RESULT_FAILED = "failed"     # временная ошибка (сеть, MAX и т.п.) — можно попробовать позже
+
+# Режим предпросмотра — см. описание в шапке файла. Включается переменной
+# окружения DRY_RUN=true в workflow (workflow_dispatch input dry_run).
+DRY_RUN = os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes")
 
 EMOJI_POOL = ["🎬", "⭐", "📸", "🎤", "✨", "💫"]
 
@@ -165,6 +198,38 @@ def load_filtered() -> list:
         return []
     with FILTERED_FILE.open(encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_slots_state() -> set:
+    if SLOTS_STATE_FILE.exists():
+        with SLOTS_STATE_FILE.open(encoding="utf-8") as f:
+            return set(json.load(f))
+    return set()
+
+
+def save_slots_state(slots: set) -> None:
+    SLOTS_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Храним только записи за последние дни, чтобы файл не рос бесконечно.
+    recent = sorted(slots)[-30:]
+    with SLOTS_STATE_FILE.open("w", encoding="utf-8") as f:
+        json.dump(recent, f, ensure_ascii=False)
+
+
+def get_due_slot(now: datetime, done_slots: set):
+    """Возвращает ключ слота 'ГГГГ-ММ-ДД_ЧЧ:ММ', который сейчас пора
+    отработать, либо None, если публиковать пока (или уже) не нужно."""
+    for slot in NEWS_SLOTS:
+        hour, minute = (int(p) for p in slot.split(":"))
+        slot_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        key = f"{now.strftime('%Y-%m-%d')}_{slot}"
+        if key in done_slots:
+            continue
+        if now < slot_dt:
+            continue
+        if now - slot_dt > timedelta(minutes=SLOT_MAX_LATE_MINUTES):
+            continue
+        return key
+    return None
 
 
 def load_state() -> set:
@@ -320,10 +385,15 @@ def try_post_article(article: dict) -> bool:
     """Пытается переписать и опубликовать одну статью в MAX, а если
     настроен Telegram — и туда же (с добавленными хэштегами, без
     повторного вызова YandexGPT).
-    Возвращает True при успешной публикации в MAX; неуспех в Telegram
-    только логируется и не меняет этот результат. Возвращает False при
-    любой неудаче до этапа публикации в MAX — включая отказ YandexGPT
-    переписывать текст (см. GptRefusalError)."""
+    В режиме DRY_RUN текст и фото подбираются по-настоящему, но реальная
+    отправка в MAX/Telegram пропускается — вместо неё готовый пост
+    печатается в лог.
+    Возвращает RESULT_POSTED при успешной публикации в MAX (или при
+    успешном предпросмотре в режиме DRY_RUN); неуспех в Telegram только
+    логируется и не меняет этот результат. RESULT_REFUSED — YandexGPT
+    отказался переписывать текст (см. GptRefusalError): такую статью
+    больше не пробуем. RESULT_FAILED — любая другая неудача до этапа
+    публикации в MAX (можно попробовать позже)."""
     title = article.get("title", "")
     url = article["url"]
     print(f"Обрабатываю: {title} ({url})")
@@ -332,31 +402,42 @@ def try_post_article(article: dict) -> bool:
         rewritten = rewrite_article(title, article.get("text", ""))
     except GptRefusalError as e:
         print(f"YandexGPT отказался переписывать эту статью ({e}). Пропускаю, НЕ публикую отказ.")
-        return False
+        return RESULT_REFUSED
     except Exception as e:
         print(f"Ошибка рерайта — {e}. Пропускаю эту статью на этот раз (не отмечаю как опубликованную).")
-        return False
+        return RESULT_FAILED
 
     emoji = random.choice(EMOJI_POOL)
     max_post_text = f"{emoji} {rewritten}\n\n_Источник: {source_name(url)}_"
 
     image_url = None
-    attachments = []
     try:
         image_url = get_post_image(article, post_text=rewritten)
-        if image_url:
+    except Exception as e:
+        print(f"Ошибка при подборе фото — {e}. Пост будет без фото.")
+
+    if DRY_RUN:
+        print("\n===== DRY RUN — пост НЕ публикуется, это только предпросмотр =====")
+        print(max_post_text)
+        print(f"\nФото (в реальном запуске будет загружено в MAX): {image_url or '— нет фото'}")
+        print("===== конец предпросмотра =====\n")
+        return RESULT_POSTED
+
+    attachments = []
+    if image_url:
+        try:
             token = upload_media_and_get_token(image_url)
             if token:
                 attachments.append({"type": "image", "payload": {"token": token}})
-    except Exception as e:
-        print(f"Ошибка при подготовке фото — {e}. Публикую без него.")
+        except Exception as e:
+            print(f"Ошибка при загрузке фото в MAX — {e}. Публикую без него.")
 
     response = send_message(max_post_text, attachments or None)
     print(f"MAX: статус публикации {response.status_code}, ответ: {response.text[:200]}")
 
     if response.status_code != 200:
         print("MAX: НЕ опубликовано, проверьте токены/права бота")
-        return False
+        return RESULT_FAILED
 
     # Дублируем пост в Telegram, если настроены секреты. Хэштеги подбираются
     # по готовому тексту через обычный поиск ключевых слов — БЕЗ повторного
@@ -380,10 +461,30 @@ def try_post_article(article: dict) -> bool:
         except Exception as e:
             print(f"Telegram: ошибка публикации — {e}")
 
-    return True
+    return RESULT_POSTED
 
 
 def main():
+    if DRY_RUN:
+        print("=== РЕЖИМ ПРЕДПРОСМОТРА (DRY_RUN) — реальной публикации не будет ===\n")
+
+    now = datetime.now(MSK)
+    print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')}")
+
+    # По расписанию публикуем только когда "созрел" слот (см. NEWS_SLOTS).
+    # При ручном запуске слоты игнорируются — публикуем сразу.
+    slot_key = None
+    slots_done = set()
+    if IS_MANUAL_RUN:
+        print("Ручной запуск — слоты публикации игнорируются")
+    else:
+        slots_done = load_slots_state()
+        slot_key = get_due_slot(now, slots_done)
+        if not slot_key:
+            print("Сейчас нет слота публикации новости (не время, слот уже отработан или окно прошло) — выхожу")
+            return
+        print(f"Слот публикации: {slot_key}")
+
     articles = load_filtered()
     state = load_state()
 
@@ -403,12 +504,21 @@ def main():
         if posted_count >= POSTS_PER_RUN:
             break
 
-        success = try_post_article(article)
-        if success:
+        result = try_post_article(article)
+        if result == RESULT_POSTED:
+            posted_count += 1
+            if not DRY_RUN:
+                state.add(article["url"])
+                changed = True
+        elif result == RESULT_REFUSED and not DRY_RUN:
+            # Отказ контент-фильтра YandexGPT по одной и той же статье не
+            # проходит от повторных попыток. Раньше такая статья оставалась
+            # в начале очереди и съедала попытки в каждом следующем запуске,
+            # из-за чего новость могла не выходить целый день. Помечаем её
+            # как обработанную — она больше не будет блокировать очередь.
             state.add(article["url"])
             changed = True
-            posted_count += 1
-        # при неуспехе просто переходим к следующему кандидату из candidates —
+        # при других неудачах просто переходим к следующему кандидату —
         # проблемная статья не блокирует остальные в этом же запуске
 
     if posted_count == 0:
@@ -419,6 +529,13 @@ def main():
 
     if changed:
         save_state(state)
+
+    # Слот закрываем только после успешной публикации — если не вышло,
+    # следующий запуск по расписанию (через 30 минут) попробует снова.
+    if posted_count > 0 and slot_key and not DRY_RUN:
+        slots_done.add(slot_key)
+        save_slots_state(slots_done)
+        print(f"Слот {slot_key} отмечен как выполненный")
 
 
 if __name__ == "__main__":
