@@ -137,6 +137,18 @@
       ]
     },
     {
+      "key": "kino_serial",
+      "time": "12:00",
+      "emoji": "🎬",
+      "title": "Что посмотреть вечером",
+      "topic_hint": "НЕ ИСПОЛЬЗУЕТСЯ — тема формируется автоматически из данных Кинопоиска (kino_source.build_topic_hint) в rubric_post_to_max.py.",
+      "length": "long",
+      "site_link": null,
+      "photo_keywords": [
+        "woman watching movie cozy blanket"
+      ]
+    },
+    {
       "key": "ezoterika",
       "time": "12:50",
       "emoji": "✨",
