@@ -78,10 +78,23 @@ ezoterika/semeinye_istorii, ей заранее подставляется ко�
 content/finance_scenarios/finance_scenarios.json, с явным требованием
 привести реалистичные цифры — см. get_finansy_topic_hint.
 
+--- Рубрика "Что посмотреть вечером" (kino_serial) ---
+Аннотация фильма или сериала (чётные числа месяца — фильм, нечётные —
+сериал). Факты (название, год, жанры, страна, рейтинг, описание, число
+сезонов и серий, постер, ссылка на трейлер) берутся из Kinopoisk
+Unofficial API (kinopoiskapiunofficial.tech) через kino_source.py, а
+YandexGPT получает их в topic_hint с требованием не выдумывать ничего
+сверх этих фактов. Вместо фото из Pexels к посту прикрепляется постер с
+Кинопоиска; если он не загрузился — берётся запасное фото из Pexels по
+photo_keywords. Ссылка на трейлер (если есть) добавляется в конец текста.
+Уже показанные фильмы записываются в used_movies.json ТОЛЬКО после успешной
+публикации в MAX (см. main), чтобы не повторяться.
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
   YANDEX_API_KEY, YANDEX_FOLDER_ID
   MAX_BOT_USERNAME                             — юзернейм бота без "@"
+  KINOPOISK_API_KEY                            — для рубрики kino_serial
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID         — опционально
 """
 import json
@@ -95,6 +108,7 @@ import pytz
 
 import telegram_common
 import photo_bank
+import kino_source
 
 # ---- НАСТРОЙКИ ----
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
@@ -915,6 +929,7 @@ def main():
         print(f"Готовлю пост для рубрики: {rubric['title']} ({rubric['key']})")
 
         test_number = None
+        kino = None
 
         try:
             if rubric["key"] == "test_dnya":
@@ -923,6 +938,12 @@ def main():
                 text = build_istoriya_zhenshiny_post(now.date())
             elif rubric["key"] == "manikur":
                 text = build_manikur_post(now.date())
+            elif rubric["key"] == "kino_serial":
+                kino = kino_source.prepare_kino(now.date())
+                active_rubric = {**rubric, "topic_hint": kino_source.build_topic_hint(kino)}
+                text = f"{rubric['emoji']} " + generate_text(active_rubric, weekday_name, date_human, season)
+                if kino.get("trailer"):
+                    text += f"\n\n▶️ Трейлер: {kino['trailer']}"
             else:
                 active_rubric = rubric
                 if rubric["key"] == "ezoterika":
@@ -967,7 +988,18 @@ def main():
         media_url = None
         media_type = None
         try:
-            media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index, season)
+            media_attachment = None
+            if rubric["key"] == "kino_serial" and kino and kino.get("poster"):
+                try:
+                    token = upload_media_and_get_token(kino["poster"], media_type="image")
+                    if token:
+                        media_attachment = {"type": "image", "payload": {"token": token}}
+                        media_url, media_type = kino["poster"], "image"
+                        print(f"Кино: постер Кинопоиска загружен в MAX: {kino['poster']}")
+                except Exception as e:
+                    print(f"Кино: постер не загрузился ({e}), беру фото из Pexels")
+            if media_attachment is None:
+                media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index, season)
             if media_attachment:
                 attachments.append(media_attachment)
         except Exception as e:
@@ -987,6 +1019,14 @@ def main():
         if response.status_code == 200:
             state.add(record_key)
             changed = True
+
+            # Фильм записывается в used_movies.json только после успешной
+            # публикации в MAX — иначе при сбое он «сгорел» бы без поста.
+            if rubric["key"] == "kino_serial" and kino:
+                try:
+                    kino_source.mark_used(kino["id"])
+                except Exception as e:
+                    print(f"Кино: не удалось записать фильм в used_movies.json — {e}")
 
             # Дублируем пост в Telegram, если настроены секреты. Хэштеги
             # подбираются по ключу рубрики — БЕЗ повторного вызова YandexGPT.
