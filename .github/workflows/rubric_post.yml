@@ -45,6 +45,11 @@ jobs:
           YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
           MAX_BOT_USERNAME: ${{ secrets.MAX_BOT_USERNAME }}
+          # Ключ Kinopoisk Unofficial API (kinopoiskapiunofficial.tech) для
+          # рубрики «Что посмотреть вечером» (kino_serial) — см. kino_source.py.
+          # Если секрет не задан, рубрика просто не опубликуется (ошибка
+          # логируется), остальные рубрики не затрагиваются.
+          KINOPOISK_API_KEY: ${{ secrets.KINOPOISK_API_KEY }}
           # Доступ к бакету Yandex Object Storage (liftdocs-files) со
           # своей базой фото под рубрики — см. photo_bank.py. Пока эти
           # два секрета не заданы (или папка рубрики в бакете ещё
@@ -60,16 +65,17 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
-      - name: Сохранить журнал опубликованных рубрик и состояние ротации фото
+      - name: Сохранить журнал опубликованных рубрик, состояние ротации фото и список показанных фильмов
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Оба файла необязательны на первом запуске (posted_rubrics.json
+          # Все файлы необязательны на первом запуске (posted_rubrics.json
           # появляется после первой успешной публикации, photo_bank_state.json —
-          # после первого взятия фото из своей базы в бакете) — добавляем
-          # в коммит только то, что реально существует.
-          for f in posted_rubrics.json photo_bank_state.json; do
+          # после первого взятия фото из своей базы в бакете, used_movies.json —
+          # после первой публикации рубрики «Что посмотреть вечером») —
+          # добавляем в коммит только то, что реально существует.
+          for f in posted_rubrics.json photo_bank_state.json used_movies.json; do
             if [ -f "$f" ]; then
               git add "$f"
             fi
@@ -80,7 +86,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Обновлён журнал опубликованных рубрик и состояние ротации фото"
+          git commit -m "Обновлён журнал опубликованных рубрик, состояние ротации фото и список показанных фильмов"
 
           # УСТОЙЧИВОСТЬ К ГОНКАМ: concurrency выше защищает только от
           # параллельных запусков ЭТОГО ЖЕ workflow, но не от любого другого
