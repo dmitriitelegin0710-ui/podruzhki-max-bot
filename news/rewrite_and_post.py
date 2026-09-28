@@ -116,8 +116,11 @@ MSK = timezone(timedelta(hours=3))
 NEWS_SLOTS = ["09:05", "13:15", "17:25"]
 SLOT_MAX_LATE_MINUTES = 120   # последний слот 17:25 → не позже 19:25, до вечернего ритуала 20:20
 SLOTS_STATE_FILE = Path("news/posted_news_slots.json")
-# При ручном запуске (кнопка Run workflow) слоты игнорируются — публикуем сразу.
-IS_MANUAL_RUN = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+# Слоты работают ВСЕГДА — и при запуске по расписанию GitHub, и при запуске
+# через API из cron-job.org (для GitHub это тоже workflow_dispatch, поэтому
+# отличить его от нажатия кнопки нельзя). Чтобы опубликовать новость прямо
+# сейчас, минуя слоты, при ручном запуске нужно включить галочку force_now.
+FORCE_NOW = os.environ.get("FORCE_NOW", "").strip().lower() in ("1", "true", "yes")
 
 # Итоги попытки опубликовать одну статью.
 RESULT_POSTED = "posted"     # опубликовано
@@ -471,17 +474,21 @@ def main():
     now = datetime.now(MSK)
     print(f"Текущее время по Москве: {now.strftime('%d.%m.%Y %H:%M')}")
 
-    # По расписанию публикуем только когда "созрел" слот (см. NEWS_SLOTS).
-    # При ручном запуске слоты игнорируются — публикуем сразу.
+    # Публикуем только когда "созрел" слот (см. NEWS_SLOTS). Исключение —
+    # ручной запуск с галочкой force_now: тогда публикуем сразу.
     slot_key = None
     slots_done = set()
-    if IS_MANUAL_RUN:
-        print("Ручной запуск — слоты публикации игнорируются")
+    if FORCE_NOW:
+        print("force_now: слоты публикации игнорируются — публикую сразу")
     else:
         slots_done = load_slots_state()
         slot_key = get_due_slot(now, slots_done)
         if not slot_key:
-            print("Сейчас нет слота публикации новости (не время, слот уже отработан или окно прошло) — выхожу")
+            print(
+                "Сейчас нет слота публикации новости (не время, слот уже отработан "
+                "или окно прошло) — выхожу. Чтобы опубликовать вручную вне слота, "
+                "включите галочку force_now."
+            )
             return
         print(f"Слот публикации: {slot_key}")
 
