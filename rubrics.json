@@ -138,7 +138,7 @@
     },
     {
       "key": "kino_serial",
-      "time": "12:00",
+      "time": "21:30",
       "emoji": "🎬",
       "title": "Что посмотреть вечером",
       "topic_hint": "НЕ ИСПОЛЬЗУЕТСЯ — тема формируется автоматически из данных Кинопоиска (kino_source.build_topic_hint) в rubric_post_to_max.py.",
