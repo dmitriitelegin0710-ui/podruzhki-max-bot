@@ -90,6 +90,18 @@ photo_keywords. Ссылка на трейлер (если есть) добав�
 Уже показанные фильмы записываются в used_movies.json ТОЛЬКО после успешной
 публикации в MAX (см. main), чтобы не повторяться.
 
+--- Рубрики "Стиль и образ" (stil) и "Красота и уход" (krasota) ---
+Текст для этих двух рубрик — ДОСЛОВНАЯ статья с реального сайта, БЕЗ
+обращения к YandexGPT: см. fashion_source.py (peopletalk.ru, раздел
+«Мода») и beauty_source.py (beautyinsider.ru, разделы уход за лицом/
+волосами/телом). Фото к посту — настоящее фото из самой статьи, а не
+из Pexels. Если свежей (ещё не публиковавшейся и прошедшей фильтр по
+теме) статьи не нашлось — рубрика прозрачно уходит на старый сценарий с
+YandexGPT (generate_text по topic_hint из rubrics.json), как и раньше.
+Дедупликация уже показанных статей — БЕЗ отдельного файла: маркеры вида
+"article_used:<rubric>:<url>" добавляются в тот же posted_rubrics.json,
+что и так пишется после каждой публикации (см. main()).
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
   YANDEX_API_KEY, YANDEX_FOLDER_ID
@@ -109,6 +121,8 @@ import pytz
 import telegram_common
 import photo_bank
 import kino_source
+import beauty_source
+import fashion_source
 
 # ---- НАСТРОЙКИ ----
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
@@ -139,6 +153,7 @@ API_BASE = "https://platform-api2.max.ru"
 YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 DEFAULT_BUTTON_TEXT = "Читать на сайте"
+SOURCE_BUTTON_TEXT = "Читать источник"
 
 MONTHS_RU = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
@@ -506,6 +521,13 @@ def build_istoriya_zhenshiny_post(target_date) -> str:
         f"_Сфера: {story['sphere']} · {story['era']}_\n\n"
         f"++{closing}++"
     )
+
+
+def build_article_post(emoji: str, article: dict) -> str:
+    """Пост из реальной статьи (рубрики «Стиль и образ» / «Красота и
+    уход») — текст публикуется ДОСЛОВНО, без обращения к YandexGPT.
+    Ссылка на источник добавляется отдельно кнопкой (см. main())."""
+    return f"{emoji} **{article['title']}**\n\n{article['text']}"
 
 
 def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
@@ -951,6 +973,7 @@ def main():
 
         test_number = None
         kino = None
+        article = None  # заполняется для stil/krasota, если нашлась свежая статья
 
         try:
             if rubric["key"] == "test_dnya":
@@ -966,6 +989,31 @@ def main():
                         + generate_text(active_rubric, weekday_name, date_human, season))
                 if kino.get("trailer"):
                     text += f"\n\n▶️ Трейлер: {kino['trailer']}"
+            elif rubric["key"] == "stil":
+                # Реальная статья с peopletalk.ru (раздел «Мода»), дословно,
+                # без YandexGPT. Если свежей подходящей статьи нет —
+                # публикуем по старому сценарию (generate_text ниже).
+                try:
+                    article = fashion_source.find_new_article(state)
+                except Exception as e:
+                    print(f"Рубрика stil: ошибка поиска статьи ({e}), публикую по старому сценарию")
+                    article = None
+                if article:
+                    text = build_article_post(rubric["emoji"], article)
+                else:
+                    text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
+            elif rubric["key"] == "krasota":
+                # Реальная статья с beautyinsider.ru (лицо/волосы/тело),
+                # дословно, без YandexGPT. Та же логика запасного сценария.
+                try:
+                    article = beauty_source.find_new_article(state)
+                except Exception as e:
+                    print(f"Рубрика krasota: ошибка поиска статьи ({e}), публикую по старому сценарию")
+                    article = None
+                if article:
+                    text = build_article_post(rubric["emoji"], article)
+                else:
+                    text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
             else:
                 active_rubric = rubric
                 if rubric["key"] == "ezoterika":
@@ -1020,6 +1068,19 @@ def main():
                         print(f"Кино: постер Кинопоиска загружен в MAX: {kino['poster']}")
                 except Exception as e:
                     print(f"Кино: постер не загрузился ({e}), беру фото из Pexels")
+            if article and article.get("image_url"):
+                # Для stil/krasota — настоящее фото из самой статьи, а не
+                # из Pexels. Если по какой-то причине не загрузится, ниже
+                # сработает обычный fetch_and_upload_media (Pexels) как
+                # запасной вариант.
+                try:
+                    token = upload_media_and_get_token(article["image_url"], media_type="image")
+                    if token:
+                        media_attachment = {"type": "image", "payload": {"token": token}}
+                        media_url, media_type = article["image_url"], "image"
+                        print(f"{rubric['key']}: фото из статьи загружено в MAX: {article['image_url']}")
+                except Exception as e:
+                    print(f"{rubric['key']}: фото статьи не загрузилось ({e}), беру фото из Pexels")
             if media_attachment is None:
                 media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index, season)
             if media_attachment:
@@ -1031,7 +1092,13 @@ def main():
             text += f"\n\n{SITE_TESTS_PLACEHOLDER_LINE}"
             attachments.extend(build_test_dnya_attachments(test_number))
         else:
-            button = build_link_button_attachment(rubric.get("site_link"))
+            # Для stil/krasota с найденной статьёй кнопка ведёт на источник
+            # статьи, а не на статичный site_link рубрики (у них он и так
+            # null в rubrics.json).
+            if article:
+                button = build_link_button_attachment(article["url"], SOURCE_BUTTON_TEXT)
+            else:
+                button = build_link_button_attachment(rubric.get("site_link"))
             if button:
                 attachments.append(button)
 
@@ -1041,6 +1108,18 @@ def main():
         if response.status_code == 200:
             state.add(record_key)
             changed = True
+
+            # Статья помечается использованной ТОЛЬКО после успешной
+            # публикации — иначе при сбое она «сгорела» бы без поста.
+            # Отдельного файла для этого нет: маркер — просто ещё одна
+            # строка в том же posted_rubrics.json.
+            if article:
+                marker_prefix = (
+                    fashion_source.ARTICLE_MARKER_PREFIX
+                    if rubric["key"] == "stil"
+                    else beauty_source.ARTICLE_MARKER_PREFIX
+                )
+                state.add(marker_prefix + article["url"])
 
             # Фильм записывается в used_movies.json только после успешной
             # публикации в MAX — иначе при сбое он «сгорел» бы без поста.
