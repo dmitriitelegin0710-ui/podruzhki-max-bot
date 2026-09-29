@@ -28,6 +28,18 @@ YandexGPT (generate_photo_keywords) по уже переписанному те�
 именно этой новости — и только если по ним ничего не нашлось на Pexels,
 используются старые общие "гламурные" слова как запасной вариант.
 
+--- Заголовок рубрики и ссылка на статью-источник ---
+Перед текстом поста добавляется общий заголовок рубрики "В курсе событий"
+с одним из эмодзи EMOJI_POOL (см. build_post_text), чтобы читательницы
+узнавали рубрику с первого взгляда — так же, как у других рубрик канала.
+Под постом, кроме текстовой подписи "_Источник: ..._", добавляется
+КЛИКАБЕЛЬНАЯ кнопка "Читать полностью" (см. max_common.build_link_button_attachment),
+ведущая на URL КОНКРЕТНОЙ статьи-источника (article["url"]), а не на
+главную страницу сайта — потому что источники разных новостей могут быть
+разными сайтами (см. rss_search.py), и ссылка на "непричастный" сайт
+была бы некорректной. В Telegram кнопка не прокидывается (см.
+telegram_common.send_message) — туда уходит только текст с фото.
+
 За один запуск публикует не больше POSTS_PER_RUN новостей — сейчас 1,
 расписание в news_post.yml вызывает скрипт несколько раз в день, чтобы
 новости не приходили пачкой, а были распределены по дню.
@@ -49,7 +61,7 @@ YandexGPT (generate_photo_keywords) по уже переписанному те�
      короткую длину (на случай, если поле status не пришло).
 Если сработало любое из двух — поднимается GptRefusalError, статья
 пропускается на этот раз (не публикуется и НЕ отмечается как
-опубликованная), а скрипт переходит к следующему кандидату из очереди.
+опубликованной), а скрипт переходит к следующему кандидату из очереди.
 
 --- Публикация в Telegram БЕЗ повторного вызова YandexGPT ---
 Если заданы TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID, после успешной
@@ -81,6 +93,7 @@ import requests
 from max_common import (
     fetch_pexels_image,
     upload_media_and_get_token,
+    build_link_button_attachment,
     send_message,
 )
 
@@ -131,7 +144,17 @@ RESULT_FAILED = "failed"     # временная ошибка (сеть, MAX и
 # окружения DRY_RUN=true в workflow (workflow_dispatch input dry_run).
 DRY_RUN = os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes")
 
+# Заголовок рубрики — печатается жирным перед текстом каждого новостного
+# поста (см. build_post_text), чтобы читательницы узнавали рубрику сразу,
+# так же как у остальных рубрик канала (сравните "Кино на вечер" и т.п.).
+RUBRIC_TITLE = "В курсе событий"
+
 EMOJI_POOL = ["🎬", "⭐", "📸", "🎤", "✨", "💫"]
+
+# Текст кнопки-ссылки на статью-источник (см. build_link_button_attachment
+# в max_common.py). Ведёт на URL КОНКРЕТНОЙ статьи, а не на сайт целиком —
+# источники разных новостей могут быть разными сайтами.
+SOURCE_BUTTON_TEXT = "Читать полностью"
 
 # Запасной пул для случаев, когда у статьи нет собственного фото.
 PHOTO_KEYWORDS = [
@@ -174,6 +197,8 @@ POST_INSTRUCTIONS = """
 - Если в исходном тексте что-то непонятно или противоречиво — просто не включай эту деталь.
 
 Не используй хэштеги. Не добавляй ссылки в текст — они не нужны.
+Комментарии под постами ОТКЛЮЧЕНЫ. НЕ задавай вопросов читательницам в конце поста и не
+проси делиться мнением в комментариях.
 
 РАЗМЕТКА (мессенджер MAX поддерживает её нативно):
   **жирный текст** — для заголовка поста и 1-2 ключевых фраз внутри
@@ -313,6 +338,19 @@ def source_name(url: str) -> str:
     return domain.split(".")[0].capitalize()
 
 
+def build_post_text(rewritten: str, url: str) -> str:
+    """Собирает финальный текст поста: заголовок рубрики (с одним из
+    EMOJI_POOL — разнообразие сохраняется, как и раньше) + переписанный
+    текст + текстовая подпись источника. Кликабельная ссылка на статью
+    добавляется ОТДЕЛЬНО как кнопка (см. try_post_article), а не в текст."""
+    emoji = random.choice(EMOJI_POOL)
+    return (
+        f"{emoji} **{RUBRIC_TITLE}**\n\n"
+        f"{rewritten}\n\n"
+        f"_Источник: {source_name(url)}_"
+    )
+
+
 def generate_photo_keywords(post_text: str) -> list:
     """По уже переписанному тексту поста просит YandexGPT сформулировать
     2-3 ключевых слова на английском для поиска ФОТО НА PEXELS, точно
@@ -410,8 +448,7 @@ def try_post_article(article: dict) -> bool:
         print(f"Ошибка рерайта — {e}. Пропускаю эту статью на этот раз (не отмечаю как опубликованную).")
         return RESULT_FAILED
 
-    emoji = random.choice(EMOJI_POOL)
-    max_post_text = f"{emoji} {rewritten}\n\n_Источник: {source_name(url)}_"
+    max_post_text = build_post_text(rewritten, url)
 
     image_url = None
     try:
@@ -422,7 +459,8 @@ def try_post_article(article: dict) -> bool:
     if DRY_RUN:
         print("\n===== DRY RUN — пост НЕ публикуется, это только предпросмотр =====")
         print(max_post_text)
-        print(f"\nФото (в реальном запуске будет загружено в MAX): {image_url or '— нет фото'}")
+        print(f"\nКнопка-ссылка на статью: {url}")
+        print(f"Фото (в реальном запуске будет загружено в MAX): {image_url or '— нет фото'}")
         print("===== конец предпросмотра =====\n")
         return RESULT_POSTED
 
@@ -435,6 +473,12 @@ def try_post_article(article: dict) -> bool:
         except Exception as e:
             print(f"Ошибка при загрузке фото в MAX — {e}. Публикую без него.")
 
+    # Кликабельная кнопка ведёт на URL именно ЭТОЙ статьи (а не на сайт
+    # целиком) — источники разных новостей могут быть разными сайтами.
+    button = build_link_button_attachment(url, SOURCE_BUTTON_TEXT)
+    if button:
+        attachments.append(button)
+
     response = send_message(max_post_text, attachments or None)
     print(f"MAX: статус публикации {response.status_code}, ответ: {response.text[:200]}")
 
@@ -444,7 +488,9 @@ def try_post_article(article: dict) -> bool:
 
     # Дублируем пост в Telegram, если настроены секреты. Хэштеги подбираются
     # по готовому тексту через обычный поиск ключевых слов — БЕЗ повторного
-    # обращения к YandexGPT.
+    # обращения к YandexGPT. Кнопка-ссылка на статью в Telegram не
+    # прокидывается (telegram_common.send_message её не поддерживает) —
+    # туда уходит только текст с фото, как и раньше.
     if telegram_common.is_configured():
         try:
             hashtags = telegram_common.generate_hashtags(
