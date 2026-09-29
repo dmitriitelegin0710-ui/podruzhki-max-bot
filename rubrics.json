@@ -45,25 +45,6 @@
       ]
     },
     {
-      "key": "zozh",
-      "time": "09:30",
-      "emoji": "💪",
-      "title": "ЗОЖ и здоровье",
-      "topic_hint": "Разбор одной полезной привычки или мифа о здоровье/питании, с объяснением почему это работает или не работает.Структурировано,с абзацами,можно с эмодзи",
-      "length": "medium",
-      "site_link": null,
-      "days": [
-        1,
-        2,
-        4,
-        5,
-        6
-      ],
-      "photo_keywords": [
-        "healthy lifestyle woman morning"
-      ]
-    },
-    {
       "key": "recept",
       "time": "08:40",
       "emoji": "🍳",
@@ -80,6 +61,25 @@
       ],
       "photo_keywords": [
         "healthy breakfast food photography"
+      ]
+    },
+    {
+      "key": "zozh",
+      "time": "09:30",
+      "emoji": "💪",
+      "title": "ЗОЖ и здоровье",
+      "topic_hint": "Разбор одной полезной привычки или мифа о здоровье/питании. ОБЯЗАТЕЛЬНО оформи пост жирными подзаголовками по образцу: сначала короткий заголовок с названием привычки/мифа; затем **Суть** — что это такое в 1-2 предложениях; затем **Почему это работает** (или **Почему это миф**) — объяснение с фактами; затем **Как применить** — один конкретный практический совет. Каждый подзаголовок с новой строки, между блоками пустая строка, можно эмодзи рядом с подзаголовками.",
+      "length": "medium",
+      "site_link": null,
+      "days": [
+        1,
+        2,
+        4,
+        5,
+        6
+      ],
+      "photo_keywords": [
+        "healthy lifestyle woman morning"
       ]
     },
     {
@@ -100,22 +100,23 @@
       "media_type": "video",
       "video_keywords_by_season": {
         "зима": [
-          "winter nail art manicure",
-          "elegant nails close up"
+          "winter manicure nail polish application",
+          "gel nail art design closeup"
         ],
         "весна": [
-          "spring nail art manicure",
-          "pastel nails close up"
+          "spring pastel manicure nail polish application",
+          "nail art design process closeup"
         ],
         "лето": [
-          "summer nail art manicure",
-          "bright nails close up"
+          "summer bright manicure nail polish application",
+          "nail art design closeup salon"
         ],
         "осень": [
-          "autumn nail art manicure",
-          "trendy nails close up"
+          "autumn manicure nail polish application",
+          "trendy nail art design closeup salon"
         ]
-      }
+      },
+      "min_video_seconds": 6
     },
     {
       "key": "psy_otnosheniya",
@@ -140,7 +141,7 @@
       "key": "kino_serial",
       "time": "12:00",
       "emoji": "🎬",
-      "title": "Что посмотреть вечером",
+      "title": "Кино на вечер",
       "topic_hint": "НЕ ИСПОЛЬЗУЕТСЯ — тема формируется автоматически из данных Кинопоиска (kino_source.build_topic_hint) в rubric_post_to_max.py.",
       "length": "long",
       "site_link": null,
@@ -256,15 +257,6 @@
       ]
     },
     {
-      "key": "test_dnya",
-      "time": "18:40",
-      "emoji": "🧠",
-      "title": "Тест дня",
-      "photo_keywords": [
-        "woman quiz test thinking cozy"
-      ]
-    },
-    {
       "key": "narodnaya_mudrost",
       "time": "17:50",
       "emoji": "🍃",
@@ -285,11 +277,20 @@
       ]
     },
     {
+      "key": "test_dnya",
+      "time": "18:40",
+      "emoji": "🧠",
+      "title": "Тест дня",
+      "photo_keywords": [
+        "woman quiz test thinking cozy"
+      ]
+    },
+    {
       "key": "semeinye_istorii",
       "time": "19:30",
       "emoji": "👀",
       "title": "Она мне рассказала",
-      "topic_hint": "Напиши полностью вымышленную (не про реальных людей) бытовую историю от первого лица о семейной драме, интриге или неожиданном повороте в отношениях (измена, ложь ради денег, конфликт со свекровью, старая любовь и т.п.) в стиле «истории из жизни» — интригующую, тёплую, цепляющую, но без пошлости и без эротических деталей. В конце — открытый вопрос к читательницам.",
+      "topic_hint": "Напиши полностью вымышленную (не про реальных людей) бытовую историю от первого лица о семейной драме, интриге или неожиданном повороте в отношениях (измена, ложь ради денег, конфликт со свекровью, старая любовь и т.п.) в стиле «истории из жизни» — интригующую, тёплую, цепляющую, но без пошлости и без эротических деталей.",
       "length": "story",
       "site_link": null,
       "photo_keywords": [
