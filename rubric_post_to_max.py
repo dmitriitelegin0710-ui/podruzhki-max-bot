@@ -107,6 +107,14 @@ YandexGPT (generate_text по topic_hint из rubrics.json), как и рань�
 "article_used:<rubric>:<url>" добавляются в тот же posted_rubrics.json,
 что и так пишется после каждой публикации (см. main()).
 
+ИСПРАВЛЕНИЕ: текст статьи раньше уходил в MAX целиком. У длинных статей
+это превышало лимит длины сообщения, MAX отвечал ошибкой, отметка в
+posted_rubrics.json не ставилась, и на следующем запуске выбиралась та же
+статья. Теперь build_article_post обрезает текст по границе абзаца
+(MAX_POST_CHARS), а при ошибке «слишком длинно» main() повторяет отправку
+с более коротким текстом. Полный текст читатель получает по кнопке
+«Читать источник».
+
 Требуемые GitHub Secrets:
   MAX_BOT_TOKEN, MAX_CHAT_ID, PEXELS_API_KEY
   YANDEX_API_KEY, YANDEX_FOLDER_ID
@@ -160,6 +168,13 @@ YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion
 YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 DEFAULT_BUTTON_TEXT = "Читать на сайте"
 SOURCE_BUTTON_TEXT = "Читать источник"
+
+# Максимальная длина поста из реальной статьи (stil/krasota). Лимит текста
+# сообщения в MAX около 4000 символов; берём с запасом. Если MAX всё равно
+# отвечает ошибкой длины, main() повторит отправку с MAX_POST_CHARS_RETRY.
+MAX_POST_CHARS = 3800
+MAX_POST_CHARS_RETRY = 2800
+ARTICLE_CONTINUE_LINE = "…Продолжение читайте по кнопке ниже 👇"
 
 MONTHS_RU = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
@@ -530,11 +545,43 @@ def build_istoriya_zhenshiny_post(target_date) -> str:
     )
 
 
-def build_article_post(emoji: str, article: dict) -> str:
+def build_article_post(emoji: str, article: dict, max_chars: int = None) -> str:
     """Пост из реальной статьи (рубрики «Стиль и образ» / «Красота и
-    уход») — текст публикуется ДОСЛОВНО, без обращения к YandexGPT.
-    Ссылка на источник добавляется отдельно кнопкой (см. main())."""
-    return f"{emoji} **{article['title']}**\n\n{article['text']}"
+    уход») — текст публикуется ДОСЛОВНО, без обращения к YandexGPT, но
+    обрезается по границе абзаца, чтобы уложиться в лимит длины сообщения
+    MAX (иначе отправка падала с ошибкой, статья не помечалась
+    использованной и выбиралась снова и снова). Ссылка на источник
+    добавляется отдельно кнопкой (см. main())."""
+    if max_chars is None:
+        max_chars = MAX_POST_CHARS
+
+    head = f"{emoji} **{article['title']}**\n\n"
+    full_text = article["text"]
+
+    # Статья и так помещается — публикуем целиком.
+    if len(head) + len(full_text) <= max_chars:
+        return head + full_text
+
+    tail = f"\n\n{ARTICLE_CONTINUE_LINE}"
+    budget = max_chars - len(head) - len(tail)
+
+    paragraphs = full_text.split("\n\n")
+    parts = []
+    total = 0
+    for p in paragraphs:
+        extra = len(p) + (2 if parts else 0)
+        if total + extra > budget:
+            break
+        parts.append(p)
+        total += extra
+
+    if parts:
+        body = "\n\n".join(parts)
+    else:
+        # Даже первый абзац не влезает — режем по границе слова.
+        body = full_text[:max(budget, 0)].rsplit(" ", 1)[0]
+
+    return head + body + tail
 
 
 def load_tests_from_md(path: str = TESTS_MD_FILE) -> list:
@@ -993,6 +1040,7 @@ def main():
     for rubric in rubrics:
         record_key = f"{today_str}_{rubric['key']}"
         if record_key in state:
+            print(f"Рубрика {rubric['key']}: уже опубликована сегодня ({record_key} в журнале), пропускаю")
             continue
 
         allowed_days = rubric.get("days")
@@ -1035,8 +1083,10 @@ def main():
                     print(f"Рубрика stil: ошибка поиска статьи ({e}), публикую по старому сценарию")
                     article = None
                 if article:
+                    print(f"Рубрика stil: найдена статья {article['url']} ({len(article['text'])} симв.)")
                     text = build_article_post(rubric["emoji"], article)
                 else:
+                    print("Рубрика stil: новая статья не найдена, публикую по старому сценарию (YandexGPT)")
                     text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
             elif rubric["key"] == "krasota":
                 # Реальная статья с beautyinsider.ru (лицо/волосы/тело),
@@ -1047,8 +1097,10 @@ def main():
                     print(f"Рубрика krasota: ошибка поиска статьи ({e}), публикую по старому сценарию")
                     article = None
                 if article:
+                    print(f"Рубрика krasota: найдена статья {article['url']} ({len(article['text'])} симв.)")
                     text = build_article_post(rubric["emoji"], article)
                 else:
+                    print("Рубрика krasota: новая статья не найдена, публикую по старому сценарию (YandexGPT)")
                     text = f"{rubric['emoji']} " + generate_text(rubric, weekday_name, date_human, season)
             else:
                 active_rubric = rubric
@@ -1140,8 +1192,26 @@ def main():
             if button:
                 attachments.append(button)
 
+        print(f"Рубрика {rubric['key']}: длина текста {len(text)} симв., вложений: {len(attachments)}")
         response = send_message(text, attachments or None)
-        print(f"Рубрика {rubric['key']}: статус {response.status_code}, ответ: {response.text[:200]}")
+        print(f"Рубрика {rubric['key']}: статус {response.status_code}, ответ: {response.text[:300]}")
+
+        # Если MAX отклонил пост (например, из-за длины текста) и это пост
+        # из реальной статьи — повторяем с более коротким текстом, чтобы
+        # статья не «зависала» в вечном цикле неудач.
+        if response.status_code != 200 and article:
+            short_text = build_article_post(rubric["emoji"], article, max_chars=MAX_POST_CHARS_RETRY)
+            if short_text != text:
+                print(
+                    f"Рубрика {rubric['key']}: повторная отправка с укороченным текстом "
+                    f"({len(short_text)} симв.)"
+                )
+                text = short_text
+                response = send_message(text, attachments or None)
+                print(
+                    f"Рубрика {rubric['key']}: повтор, статус {response.status_code}, "
+                    f"ответ: {response.text[:300]}"
+                )
 
         if response.status_code == 200:
             state.add(record_key)
