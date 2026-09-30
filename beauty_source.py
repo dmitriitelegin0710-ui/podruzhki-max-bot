@@ -31,7 +31,7 @@ from bs4 import BeautifulSoup
 
 FEEDS = [
     "https://www.beautyinsider.ru/category/facial-care/feed/",
-    "https://www.beautyinsider.ru/category/dlya-volos/feed/",
+    "https://www.beautyinsider.ru/category/hair/feed/",
     "https://www.beautyinsider.ru/category/body-care/feed/",
 ]
 
@@ -72,13 +72,19 @@ def _extract_full_text(article_url: str) -> str:
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    container = (
-        soup.find("div", class_="entry-content")
-        or soup.find("article")
-        or soup.find("div", class_="post-content")
-    )
+    # Подтверждено реальным HTML страницы статьи: контейнер — именно
+    # div.single-content (WordPress-тема beautyinsider2021).
+    container = soup.find("div", class_="single-content")
     if not container:
         return ""
+
+    # Виджет "Содержание" (bi-table-of-contents) заполняется JS-ом уже в
+    # браузере — в сыром HTML это просто иконка-заглушка без текста.
+    # Без удаления получился бы висячий подзаголовок "О чём это мы тут?"
+    # без содержимого.
+    toc = container.find("div", class_="bi-table-of-contents")
+    if toc:
+        toc.decompose()
 
     for tag in container.find_all(["script", "style", "aside", "nav", "form"]):
         tag.decompose()
@@ -94,6 +100,9 @@ def _extract_full_text(article_url: str) -> str:
             paragraphs.append(f"**{text}**")
         elif el.name == "li":
             paragraphs.append(f"• {text}")
+        elif el.find_parent("blockquote"):
+            # Цитаты-врезки ("«Вау, это точно мои волосы?»") оформляем курсивом.
+            paragraphs.append(f"_{text}_")
         else:
             paragraphs.append(text)
 
