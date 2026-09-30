@@ -48,16 +48,21 @@ rubrics.json.
 просто пропускается. MAX остаётся источником истины для
 "опубликовано/не опубликовано": неуспех в Telegram только логируется.
 fetch_and_upload_media возвращает ещё и исходный URL медиа (до
-загрузки в MAX) и его тип (сейчас всегда "image") — нужно, чтобы то же
+загрузки в MAX) и его тип ("image" или "video") — нужно, чтобы то же
 самое медиа можно было отдельно скачать и отправить в Telegram.
 
 --- Рубрика "Маникюр дня" (manikur) ---
 Рубрика с "media_type": "video" в rubrics.json. Вместо фото к посту
-прикрепляется короткое вертикальное видео с Pexels (Pexels Video API),
-подобранное по video_keywords_by_season — статичным ключевым словам под
-текущее время года (см. get_video_keywords/fetch_pexels_video). Текст к
-видео короткий и генерируется YandexGPT как обычно, с учётом даты и сезона
-(они и так передаются в каждый вызов generate_text). Собственная база фото
+прикрепляется короткое видео. Порядок попыток (см. fetch_and_upload_media):
+  1) Собственный видео-банк (manikur_bank.get_manikur_video) — заранее
+     проверенные вручную ролики Pexels (по ID), привязанные к сезону и
+     дню. manikur_bank.py лежит в корне репозитория рядом с photo_bank.py
+     и через Pexels API получает прямую ссылку на файл по ID ролика.
+  2) Если банк пуст или ролик не загрузился в MAX — прежний запасной
+     вариант: случайный поиск Pexels Video API по video_keywords_by_season
+     (см. get_video_keywords/fetch_pexels_video).
+Текст к видео — нейтральная подпись без обращения к YandexGPT (см.
+build_manikur_post), подходящая к любому ролику. Собственная база фото
 (photo_bank) для этой рубрики не используется — она поддерживает только
 фото. В Telegram (если настроен) для этой рубрики уходит только текст, без
 видео — video_url туда пока не прокидывается, см. main().
@@ -120,6 +125,7 @@ import pytz
 
 import telegram_common
 import photo_bank
+import manikur_bank
 import kino_source
 import beauty_source
 import fashion_source
@@ -496,12 +502,13 @@ def build_manikur_post(target_date) -> str:
 
     Раньше текст генерировала модель по общей теме ('идея маникюра под
     сезон'), но она физически не может знать, что именно попало в кадр
-    конкретного случайного видео с Pexels — итог мог описывать бордовый
-    лак, пока на видео был совсем другой дизайн на светлых ногтях.
-    Единственный надёжный способ не противоречить видео — не описывать
-    конкретику вообще: подпись нейтральная и подходит к любому ролику.
-    Ротация подписей детерминирована по дате, чтобы в течение одного дня
-    (при повторных запусках) текст не менялся."""
+    конкретного видео — итог мог описывать бордовый лак, пока на видео
+    был совсем другой дизайн на светлых ногтях. Единственный надёжный
+    способ не противоречить видео — не описывать конкретику вообще:
+    подпись нейтральная и подходит к любому ролику (и из своего банка
+    manikur_bank, и из случайного поиска Pexels). Ротация подписей
+    детерминирована по дате, чтобы в течение одного дня (при повторных
+    запусках) текст не менялся."""
     caption = MANIKUR_CAPTIONS[target_date.toordinal() % len(MANIKUR_CAPTIONS)]
     return caption
 
@@ -659,7 +666,7 @@ EMOJI_PATTERN = re.compile(
 
 
 def strip_emoji(text: str) -> str:
-    """Для рубрик с 'no_emoji': true в rubrics.json (сейчас — «Маникюр дня»).
+    """Для рубрик с 'no_emoji': true в rubrics.json.
     Программная подстраховка на случай, если модель проигнорирует
     текстовую инструкцию 'не используй эмодзи' в topic_hint (нередко
     бывает с лёгкими моделями вроде yandexgpt-lite) — убирает эмодзи уже
@@ -733,7 +740,8 @@ def fetch_pexels_image(keywords: list):
 def fetch_pexels_video(keywords: list, min_duration: int = 0):
     """Аналог fetch_pexels_image, но для рубрик с media_type='video'
     (сейчас — «Маникюр дня»). Пробует ключевые слова по очереди, как заданы
-    в rubrics.json.
+    в rubrics.json. Используется как ЗАПАСНОЙ вариант, если собственный
+    видео-банк (manikur_bank) пуст или из него не удалось загрузить ролик.
 
     ВАЖНО: раньше запрос шёл с жёстким параметром orientation=portrait —
     для нишевых запросов вроде 'маникюр крупным планом' Pexels мог просто
@@ -873,16 +881,23 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
     return rubric.get("photo_keywords", [])
 
 
-def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None):
+def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None, target_date=None):
     """Готовит медиа-вложение для поста в MAX.
     Возвращает кортеж (attachment, media_url, media_type) — media_url и
     media_type ("image" или "video") нужны, чтобы то же самое медиа можно
     было отдельно отправить в Telegram через telegram_common.py.
 
+    target_date — дата публикации (datetime.date); нужна для выбора ролика
+    из собственного видео-банка manikur_bank (привязка по сезону/дню).
+
     Для рубрик с "media_type": "video" в rubrics.json (сейчас — «Маникюр
-    дня») медиа берётся через Pexels Video API по video_keywords_by_season,
-    БЕЗ обращения к собственной базе фото (photo_bank поддерживает только
-    фото) и без вызова YandexGPT для подбора слов.
+    дня») порядок такой:
+      1) собственный видео-банк (manikur_bank.get_manikur_video) — заранее
+         проверенные ролики Pexels по ID;
+      2) если банк пуст или ролик не загрузился в MAX — случайный поиск
+         Pexels Video API по video_keywords_by_season (как раньше).
+    Собственная база фото (photo_bank) для видео не используется, вызова
+    YandexGPT для подбора слов тоже нет.
 
     Для всех остальных рубрик — прежний порядок: сначала собственная база
     (photo_bank.get_own_photo), затем Pexels по статичным ключевым словам
@@ -891,6 +906,27 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None)
     уже покрывала рубрику, впустую тратя токены."""
 
     if rubric.get("media_type") == "video":
+        # 1) Свой видео-банк — самый надёжный вариант: ролик проверен вручную.
+        own_url = None
+        try:
+            own_url = manikur_bank.get_manikur_video(season, target_date)
+        except Exception as e:
+            print(f"Маникюр: свой банк видео — ошибка ({e}), пробую случайный поиск Pexels")
+            own_url = None
+
+        if own_url:
+            try:
+                token = upload_media_and_get_token(own_url, media_type="video")
+                if token:
+                    print(f"Маникюр: видео взято из своего банка: {own_url}")
+                    return {"type": "video", "payload": {"token": token}}, own_url, "video"
+                print("Маникюр: MAX не вернул token для видео из банка, пробую случайный поиск Pexels")
+            except Exception as e:
+                print(f"Маникюр: свой банк видео не загрузился ({e}), пробую случайный поиск Pexels")
+        else:
+            print("Маникюр: в своём банке нет подходящего видео, иду в случайный поиск Pexels")
+
+        # 2) Запасной вариант — случайный поиск Pexels по ключевым словам.
         video_keywords = get_video_keywords(rubric, season)
         min_duration = rubric.get("min_video_seconds", 0)
         print(
@@ -909,7 +945,7 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None)
         if not token:
             print("Маникюр: MAX не вернул token для видео, публикую без видео")
             return None, None, None
-        print(f"Маникюр: видео успешно загружено в MAX, token получен")
+        print("Маникюр: видео успешно загружено в MAX, token получен")
         attachment = {"type": "video", "payload": {"token": token}}
         return attachment, url, "video"
 
@@ -1082,7 +1118,9 @@ def main():
                 except Exception as e:
                     print(f"{rubric['key']}: фото статьи не загрузилось ({e}), беру фото из Pexels")
             if media_attachment is None:
-                media_attachment, media_url, media_type = fetch_and_upload_media(rubric, weekday_index, season)
+                media_attachment, media_url, media_type = fetch_and_upload_media(
+                    rubric, weekday_index, season, now.date()
+                )
             if media_attachment:
                 attachments.append(media_attachment)
         except Exception as e:
