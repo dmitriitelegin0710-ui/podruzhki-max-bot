@@ -22,6 +22,12 @@
 
 ДЕДУПЛИКАЦИЯ БЕЗ ОТДЕЛЬНОГО ФАЙЛА — как в beauty_source.py: маркеры
 ARTICLE_MARKER_PREFIX + url добавляются в posted_rubrics.json.
+
+ИЗМЕНЕНИЯ: (1) стоп-маркеры ("Поделиться", "Комментарии" и т.п.) теперь
+срабатывают только на короткие служебные строки или на строки, которые с
+них начинаются, а не на любой абзац, где встретилось такое слово;
+(2) белый список заголовков расширен; (3) в лог печатается причина
+отсева каждой статьи.
 """
 import re
 
@@ -47,7 +53,9 @@ TITLE_BLACKLIST = re.compile(
 # этих признаков (быть советом/разбором тренда).
 TITLE_WHITELIST = re.compile(
     r"совет стилиста|тренд|гардероб|как носить|как сочетать|капсул|"
-    r"стиль[ае]?\b|образ[а-я]* дня|базов[а-я]+ вещ",
+    r"стиль[ае]?\b|образ[а-я]* дня|базов[а-я]+ вещ|"
+    r"осен|\bлук|сочетани|\bбаз[аыу]\b|модн|что надеть|с чем носить|"
+    r"must.?have|маст.?хэв",
     re.IGNORECASE,
 )
 
@@ -56,6 +64,21 @@ TITLE_WHITELIST = re.compile(
 PLACEHOLDER_IMAGE_MARKERS = ("clear-podcast", "clear-content", "clear-small", "clear.png")
 
 STOP_MARKERS = ["Читайте также", "Поделиться", "Похожие статьи", "Комментарии"]
+
+
+def _is_stop_line(text: str) -> bool:
+    """Служебная строка в конце статьи: либо начинается со стоп-маркера
+    ("Читайте также: ..."), либо это короткая строка, где маркер встречается
+    (например, просто "Поделиться"). Обычный абзац, в котором случайно
+    встретилось слово «комментарии», стоп-строкой НЕ считается."""
+    lowered = text.lower()
+    for marker in STOP_MARKERS:
+        m = marker.lower()
+        if lowered.startswith(m):
+            return True
+        if len(text) < 60 and m in lowered:
+            return True
+    return False
 
 
 def _parse_article_html(raw_html: str):
@@ -89,7 +112,7 @@ def _parse_article_html(raw_html: str):
             continue
         if "instagram" in text.lower():
             continue
-        if any(marker.lower() in text.lower() for marker in STOP_MARKERS):
+        if _is_stop_line(text):
             break
         if el.name in ("h2", "h3"):
             paragraphs.append(f"**{text}**")
@@ -108,16 +131,27 @@ def find_new_article(already_used: set):
         print(f"Стиль: ошибка чтения ленты {FEED_URL} — {e}")
         return None
 
-    for entry in feed.entries[:15]:
+    entries = feed.entries[:15]
+    status = getattr(feed, "status", "нет")
+    print(f"Стиль: лента прочитана (HTTP {status}), записей: {len(entries)}")
+    if not entries:
+        print(f"Стиль: лента пуста или недоступна: {getattr(feed, 'bozo_exception', '')}")
+        return None
+
+    for entry in entries:
         url = entry.get("link")
         title = entry.get("title", "").strip()
         if not url or not title:
             continue
+        print(f"Стиль: кандидат «{title}»")
         if ARTICLE_MARKER_PREFIX + url in already_used:
+            print("  отсеян: уже публиковалась")
             continue
         if TITLE_BLACKLIST.search(title):
+            print("  отсеян: чёрный список")
             continue
         if not TITLE_WHITELIST.search(title):
+            print("  отсеян: нет в белом списке")
             continue
 
         raw_html = ""
@@ -129,9 +163,11 @@ def find_new_article(already_used: set):
         text, image_url = _parse_article_html(raw_html)
 
         if len(text) < MIN_TEXT_CHARS:
-            print(f"Стиль: текст статьи {url} короче {MIN_TEXT_CHARS} символов, пропускаю")
+            print(f"  отсеян: текст {len(text)} симв., короче {MIN_TEXT_CHARS} ({url})")
             continue
 
+        print(f"  ВЫБРАНА: {url} ({len(text)} симв.)")
         return {"url": url, "title": title, "text": text, "image_url": image_url}
 
+    print("Стиль: подходящих новых статей не нашлось")
     return None
