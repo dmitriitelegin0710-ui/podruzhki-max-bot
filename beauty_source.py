@@ -22,6 +22,13 @@
 rubric_post_to_max.py добавляет в тот же posted_rubrics.json, что и
 так пишется после каждой публикации (там это просто дополнительные
 элементы множества, наравне с датой-ключами рубрик).
+
+ИЗМЕНЕНИЯ: (1) стоп-маркеры ("Поделиться", "Комментарии" и т.п.) теперь
+срабатывают только на короткие служебные строки или на строки, которые с
+них начинаются, а не на любой абзац, где встретилось такое слово —
+раньше из-за этого статьи обрезались и отсеивались как «короче 400
+символов»; (2) в лог печатается статус каждой ленты, каждого кандидата и
+причина отсева.
 """
 import re
 
@@ -46,9 +53,24 @@ MIN_TEXT_CHARS = 400
 TITLE_BLACKLIST = re.compile(r"\bтест\b|видеообзор|видеоинструкция", re.IGNORECASE)
 
 # На странице статьи это обычно начало блока с "читайте также",
-# комментариями и т.п. — как только встретили один из этих кусков
-# текста, дальше не собираем.
+# комментариями и т.п. — как только встретили такую служебную строку,
+# дальше не собираем.
 STOP_MARKERS = ["Читайте также", "Поделиться", "Похожие статьи", "Комментарии"]
+
+
+def _is_stop_line(text: str) -> bool:
+    """Служебная строка в конце статьи: либо начинается со стоп-маркера
+    ("Читайте также: ..."), либо это короткая строка, где маркер встречается
+    (например, просто "Поделиться"). Обычный абзац, в котором случайно
+    встретилось слово «комментарии», стоп-строкой НЕ считается."""
+    lowered = text.lower()
+    for marker in STOP_MARKERS:
+        m = marker.lower()
+        if lowered.startswith(m):
+            return True
+        if len(text) < 60 and m in lowered:
+            return True
+    return False
 
 
 def _extract_image_from_description(description: str):
@@ -61,8 +83,8 @@ def _extract_image_from_description(description: str):
 
 def _extract_full_text(article_url: str) -> str:
     """Лучшее из возможного для типовой вёрстки WordPress: ищем контейнер
-    статьи по нескольким распространённым классам, вырезаем служебные
-    элементы, собираем параграфы/подзаголовки/списки в MAX-разметку.
+    статьи, вырезаем служебные элементы, собираем параграфы/подзаголовки/
+    списки в MAX-разметку.
 
     Если после первого реального запуска окажется, что beautyinsider.ru
     использует другие названия классов — эту функцию нужно будет
@@ -76,6 +98,7 @@ def _extract_full_text(article_url: str) -> str:
     # div.single-content (WordPress-тема beautyinsider2021).
     container = soup.find("div", class_="single-content")
     if not container:
+        print(f"  на странице нет div.single-content (вёрстка изменилась?) {article_url}")
         return ""
 
     # Виджет "Содержание" (bi-table-of-contents) заполняется JS-ом уже в
@@ -94,7 +117,7 @@ def _extract_full_text(article_url: str) -> str:
         text = el.get_text(" ", strip=True)
         if not text or len(text) < 3:
             continue
-        if any(marker.lower() in text.lower() for marker in STOP_MARKERS):
+        if _is_stop_line(text):
             break
         if el.name in ("h2", "h3"):
             paragraphs.append(f"**{text}**")
@@ -121,27 +144,39 @@ def find_new_article(already_used: set):
             print(f"Красота: ошибка чтения ленты {feed_url} — {e}")
             continue
 
-        for entry in feed.entries[:10]:
+        entries = feed.entries[:10]
+        status = getattr(feed, "status", "нет")
+        print(f"Красота: лента {feed_url} (HTTP {status}), записей: {len(entries)}")
+        if not entries:
+            print(f"  лента пуста или недоступна: {getattr(feed, 'bozo_exception', '')}")
+            continue
+
+        for entry in entries:
             url = entry.get("link")
             title = entry.get("title", "").strip()
             if not url or not title:
                 continue
+            print(f"Красота: кандидат «{title}»")
             if ARTICLE_MARKER_PREFIX + url in already_used:
+                print("  отсеян: уже публиковалась")
                 continue
             if TITLE_BLACKLIST.search(title):
+                print("  отсеян: чёрный список")
                 continue
 
             try:
                 text = _extract_full_text(url)
             except Exception as e:
-                print(f"Красота: не удалось получить текст статьи {url} — {e}")
+                print(f"  отсеян: не удалось получить текст статьи {url} — {e}")
                 continue
 
             if len(text) < MIN_TEXT_CHARS:
-                print(f"Красота: текст статьи {url} короче {MIN_TEXT_CHARS} символов, пропускаю")
+                print(f"  отсеян: текст {len(text)} симв., короче {MIN_TEXT_CHARS} ({url})")
                 continue
 
             image_url = _extract_image_from_description(entry.get("description", ""))
+            print(f"  ВЫБРАНА: {url} ({len(text)} симв.)")
             return {"url": url, "title": title, "text": text, "image_url": image_url}
 
+    print("Красота: подходящих новых статей не нашлось")
     return None
