@@ -124,6 +124,32 @@ def _parse_article_html(raw_html: str):
     return "\n\n".join(paragraphs), image_url
 
 
+def _norm_url(url: str) -> str:
+    """Приводит ссылку к единому виду (без http/https, www, параметров,
+    якоря и хвостового слэша), чтобы одна и та же статья не считалась
+    новой из-за мелкого отличия в написании ссылки."""
+    url = url.strip().lower()
+    url = re.sub(r"^https?://(www\.)?", "", url)
+    url = url.split("#")[0].split("?")[0]
+    return url.rstrip("/")
+
+
+def _image_from_entry(entry):
+    """Запасные места, где RSS может хранить картинку статьи, если в самом
+    тексте её нет или там только заглушка."""
+    for key in ("media_content", "media_thumbnail"):
+        items = entry.get(key) or []
+        if items and items[0].get("url"):
+            return items[0]["url"]
+    for link in entry.get("links", []) or []:
+        if str(link.get("type", "")).startswith("image") and link.get("href"):
+            return link["href"]
+    for enc in entry.get("enclosures", []) or []:
+        if str(enc.get("type", "")).startswith("image") and enc.get("href"):
+            return enc["href"]
+    return None
+
+
 def find_new_article(already_used: set):
     try:
         feed = feedparser.parse(FEED_URL, request_headers={"User-Agent": "Mozilla/5.0"})
@@ -138,13 +164,20 @@ def find_new_article(already_used: set):
         print(f"Стиль: лента пуста или недоступна: {getattr(feed, 'bozo_exception', '')}")
         return None
 
+    used_norm = {
+        _norm_url(s[len(ARTICLE_MARKER_PREFIX):])
+        for s in already_used
+        if s.startswith(ARTICLE_MARKER_PREFIX)
+    }
+    print(f"Стиль: в журнале уже отмечено статей: {len(used_norm)}")
+
     for entry in entries:
         url = entry.get("link")
         title = entry.get("title", "").strip()
         if not url or not title:
             continue
         print(f"Стиль: кандидат «{title}»")
-        if ARTICLE_MARKER_PREFIX + url in already_used:
+        if _norm_url(url) in used_norm:
             print("  отсеян: уже публиковалась")
             continue
         if TITLE_BLACKLIST.search(title):
@@ -165,6 +198,12 @@ def find_new_article(already_used: set):
         if len(text) < MIN_TEXT_CHARS:
             print(f"  отсеян: текст {len(text)} симв., короче {MIN_TEXT_CHARS} ({url})")
             continue
+
+        if not image_url:
+            image_url = _image_from_entry(entry)
+            print(f"  картинка из текста не найдена, из полей RSS: {image_url}")
+        else:
+            print(f"  картинка из текста статьи: {image_url}")
 
         print(f"  ВЫБРАНА: {url} ({len(text)} симв.)")
         return {"url": url, "title": title, "text": text, "image_url": image_url}
