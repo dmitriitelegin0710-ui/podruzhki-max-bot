@@ -1,15 +1,24 @@
 """
 Источник реальных статей для рубрики «Стиль и образ» (stil).
 
-Берёт свежие статьи из RSS раздела «Мода» на peopletalk.ru. В отличие
-от beauty_source.py, здесь заходить на страницу статьи не нужно: полный
-текст уже лежит в самой RSS-ленте, в теге content:encoded (feedparser
-отдаёт его как entry.content[0]['value']).
+Берёт свежие статьи из RSS раздела «Мода» на peopletalk.ru. Полный текст
+статьи уже лежит в самой RSS-ленте, в теге content:encoded (feedparser
+отдаёт его как entry.content[0]['value']) — это чистый фрагмент текста
+поста, БЕЗ обёртки страницы (рекламы, сайдбара, тег-навигации), поэтому
+заходить на страницу не нужно.
 
 Лента вперемешку публикует и разборы гардероба/трендов (нужны рубрике),
 и подборки образов конкретных знаменитостей, итоги недель моды и т.п.
 (светская хроника, не нужна) — вторые отфильтровываются по заголовку,
 см. TITLE_BLACKLIST/TITLE_WHITELIST.
+
+Фотогалереи в статьях (<figure class="wp-block-gallery">) убираются
+целиком вместе с подписями вида "Фото: @account (Instagram*)" — эти
+подписи не несут полезного текста, только кредит фото. Заодно это
+убирает все упоминания Instagram, так что стоящую рядом по закону РФ
+сноску про признание Meta экстремистской организацией тоже можно не
+показывать: раз ни одного упоминания площадки не осталось, показывать
+её было бы не нужно и вводило бы читателя в заблуждение.
 
 ДЕДУПЛИКАЦИЯ БЕЗ ОТДЕЛЬНОГО ФАЙЛА — как в beauty_source.py: маркеры
 ARTICLE_MARKER_PREFIX + url добавляются в posted_rubrics.json.
@@ -17,6 +26,7 @@ ARTICLE_MARKER_PREFIX + url добавляются в posted_rubrics.json.
 import re
 
 import feedparser
+from bs4 import BeautifulSoup
 
 FEED_URL = "https://peopletalk.ru/category/fashion/feed/"
 
@@ -41,34 +51,54 @@ TITLE_WHITELIST = re.compile(
     re.IGNORECASE,
 )
 
+# Заглушки лоадера ("ленивая загрузка") вместо настоящей картинки —
+# встречаются в src, пока data-src ещё не подгрузился в браузере.
+PLACEHOLDER_IMAGE_MARKERS = ("clear-podcast", "clear-content", "clear-small", "clear.png")
 
-def _extract_image(html: str):
-    """У peopletalk.ru картинки грузятся лениво: в src — заглушка
-    (clear-podcast.png), реальный адрес — в data-src. Берём его."""
-    match = re.search(r'data-src="([^"]+\.(?:jpg|jpeg|png|webp))"', html or "", re.IGNORECASE)
-    return match.group(1) if match else None
+STOP_MARKERS = ["Читайте также", "Поделиться", "Похожие статьи", "Комментарии"]
 
 
-def _clean_text(html: str) -> str:
-    """HTML из content:encoded -> обычный текст с MAX-разметкой
-    (**подзаголовки**, • для списков), без картинок и служебных блоков.
+def _parse_article_html(raw_html: str):
+    """Возвращает (text, image_url) из HTML content:encoded статьи.
+    Фрагмент из RSS — это сам текст поста без обёртки страницы, поэтому
+    парсим его целиком, без поиска отдельного контейнера."""
+    soup = BeautifulSoup(raw_html, "html.parser")
 
-    Галереи и подписи к фото убираются вместе с дисклеймером про
-    запрет Instagram в РФ — он нужен только при упоминании самой
-    площадки, а мы эти подписи не публикуем."""
-    html = re.sub(r"<figure.*?</figure>", "", html, flags=re.DOTALL)
-    html = re.sub(r"<hr\s*/?>.*?Instagram запрещен.*?</p>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    html = re.sub(r"<style.*?</style>", "", html, flags=re.DOTALL)
-    html = re.sub(r"<p>\s*Запись <a.*?</p>", "", html, flags=re.DOTALL)  # автоприписка WordPress
+    # Настоящую картинку берём ДО того, как уберём все <figure> — иначе
+    # она уйдёт вместе с ними.
+    image_url = None
+    first_img = soup.find("img")
+    if first_img:
+        candidate = first_img.get("data-src") or first_img.get("src")
+        if candidate and not any(marker in candidate for marker in PLACEHOLDER_IMAGE_MARKERS):
+            image_url = candidate
 
-    html = re.sub(r"<h([23])[^>]*>(.*?)</h\1>", r"\n\n**\2**\n\n", html, flags=re.DOTALL)
-    html = re.sub(r"<li[^>]*>(.*?)</li>", r"• \1\n", html, flags=re.DOTALL)
-    html = re.sub(r"<p[^>]*>(.*?)</p>", r"\1\n\n", html, flags=re.DOTALL)
-    html = re.sub(r"<[^>]+>", "", html)  # остальные теги (b, em, span и т.п.)
-    html = html.replace("&nbsp;", " ")
-    html = re.sub(r"[ \t]{2,}", " ", html)
-    html = re.sub(r"\n{3,}", "\n\n", html)
-    return html.strip()
+    # Одиночные фото и фотогалереи убираем целиком — их подписи это
+    # только кредит вида "Фото: @account (Instagram*)", без полезного
+    # текста (см. пояснение в шапке файла).
+    for fig in soup.find_all("figure"):
+        fig.decompose()
+
+    for tag in soup.find_all(["script", "style", "nav", "aside", "form", "ins"]):
+        tag.decompose()
+
+    paragraphs = []
+    for el in soup.find_all(["p", "h2", "h3", "li"]):
+        text = el.get_text(" ", strip=True)
+        if not text or len(text) < 3:
+            continue
+        if "instagram" in text.lower():
+            continue
+        if any(marker.lower() in text.lower() for marker in STOP_MARKERS):
+            break
+        if el.name in ("h2", "h3"):
+            paragraphs.append(f"**{text}**")
+        elif el.name == "li":
+            paragraphs.append(f"• {text}")
+        else:
+            paragraphs.append(text)
+
+    return "\n\n".join(paragraphs), image_url
 
 
 def find_new_article(already_used: set):
@@ -96,8 +126,7 @@ def find_new_article(already_used: set):
         if not raw_html:
             raw_html = entry.get("description", "")
 
-        image_url = _extract_image(raw_html)
-        text = _clean_text(raw_html)
+        text, image_url = _parse_article_html(raw_html)
 
         if len(text) < MIN_TEXT_CHARS:
             print(f"Стиль: текст статьи {url} короче {MIN_TEXT_CHARS} символов, пропускаю")
