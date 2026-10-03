@@ -45,6 +45,15 @@ jobs:
           YANDEX_API_KEY: ${{ secrets.YANDEX_API_KEY }}
           YANDEX_FOLDER_ID: ${{ secrets.YANDEX_FOLDER_ID }}
           MAX_BOT_USERNAME: ${{ secrets.MAX_BOT_USERNAME }}
+          # Генерация картинок по тексту поста через Cloudflare Workers AI
+          # (FLUX.1 schnell) — см. cf_image.py. Включена только для рубрик из
+          # AI_IMAGE_RUBRICS в rubric_post_to_max.py. Если секреты не заданы,
+          # генерация пропускается (в логе будет строка «ПРОПУЩЕНО»), и фото
+          # берётся из своей базы / Pexels. Полностью выключить генерацию:
+          # раскомментируйте строку AI_IMAGES ниже.
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          # AI_IMAGES: "0"
           # Ключ Kinopoisk Unofficial API (kinopoiskapiunofficial.tech) для
           # рубрики «Что посмотреть вечером» (kino_serial) — см. kino_source.py.
           # Если секрет не задан, рубрика просто не опубликуется (ошибка
@@ -66,6 +75,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       - name: Сохранить журнал опубликованных рубрик, состояние ротации фото и список показанных фильмов
+        # always(): журнал сохраняется, даже если шаг публикации завершился
+        # ошибкой уже после того, как часть постов вышла. Иначе опубликованные
+        # посты не отмечались бы в posted_rubrics.json и могли повториться.
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
