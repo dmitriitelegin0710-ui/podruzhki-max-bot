@@ -11,7 +11,12 @@ kino_source.py — подбор фильма/сериала для рубрик�
     затем более ранние, затем вся база. Внутри ступени список отсортирован
     по популярности (число голосов на Кинопоиске), берётся первый ещё не
     показанный тайтл;
-  * показанные тайтлы записываются в used_movies.json и не повторяются.
+  * показанные тайтлы записываются в used_movies.json и не повторяются;
+  * ФИЛЬТР ДЛЯ ЖЕНСКОЙ АУДИТОРИИ: тайтл с жанром из GENRES_BLOCK (боевик,
+    криминал, ужасы, аниме, мультфильм и т.д.) отбрасывается, даже если рядом
+    указана «драма»; берутся тайтлы хотя бы с одним жанром из GENRES_ALLOW,
+    а триллер — только в сочетании с драмой, мелодрамой или детективом.
+    Отсеянные тайтлы с причиной печатаются в лог. См. is_suitable_genres().
 
 Подключение в rubric_post_to_max.py (уже сделано):
     kino = kino_source.prepare_kino(now.date())
@@ -42,7 +47,28 @@ MEDIA_DIR = os.path.join(BASE_DIR, "kino_media")
 # автоматически из справочника API, поэтому сверять числа не нужно. Если названия
 # нет в справочнике — оно пропускается с предупреждением в логе.
 # Полный список доступных жанров выведет:  python kino_source.py
-GENRES = ["мелодрама", "драма", "триллер", "детектив", "комедия", "криминал"]
+GENRES = ["мелодрама", "комедия", "драма", "детектив", "триллер", "семейный", "биография", "фэнтези"]
+
+# ---- Фильтр для женской аудитории (применяется к жанрам КАЖДОГО тайтла) ----
+# Поиск по жанру (GENRES) только находит кандидатов, а решает этот фильтр:
+# у фильма «драма, криминал, боевик» поиск по «драме» его найдёт, а фильтр
+# отбросит из-за «криминала» и «боевика».
+#
+# Тайтл ОТБРАСЫВАЕТСЯ, если у него есть хотя бы один из этих жанров.
+GENRES_BLOCK = {
+    "боевик", "криминал", "ужасы", "военный", "вестерн", "спорт", "фильм-нуар",
+    "аниме", "мультфильм", "детский",
+    "документальный", "реальное тв", "ток-шоу", "новости", "концерт", "музыка",
+    "игра", "церемония", "короткометражка", "для взрослых",
+}
+# Тайтл ПОДХОДИТ, если у него есть хотя бы один из этих жанров
+# (и нет ни одного из GENRES_BLOCK).
+GENRES_ALLOW = {
+    "мелодрама", "комедия", "драма", "детектив", "семейный",
+    "биография", "мюзикл", "фэнтези",
+}
+# Триллер подходит только вместе с одним из этих жанров.
+THRILLER_PARTNERS = {"драма", "мелодрама", "детектив"}
 
 # Чередование происхождения по дням: "foreign" — зарубежные, "ru" — российские.
 # Пропорция 50/50. Хотите чаще зарубежные — например ["foreign", "foreign", "ru"].
@@ -64,6 +90,31 @@ MAX_PAGES = 5  # сколько страниц списка (по 20 тайтл�
 
 # Страны, которые считаются «российскими» (для деления на ru / foreign).
 RU_COUNTRIES = {"россия", "ссср"}
+
+
+# ---------------- фильтр для женской аудитории ----------------
+def _item_genres(item):
+    """Названия жанров из элемента списка/деталей API (строчными)."""
+    return {(g.get("genre") or "").strip().lower() for g in item.get("genres", []) or []}
+
+
+def is_suitable_genres(genres):
+    """(подходит?, причина) для набора жанров тайтла. Порядок проверок:
+    1) любой жанр из GENRES_BLOCK -> отбросить;
+    2) любой жанр из GENRES_ALLOW -> взять;
+    3) триллер вместе с драмой/мелодрамой/детективом -> взять;
+    4) иначе отбросить."""
+    names = {g.strip().lower() for g in genres}
+    if not names:
+        return False, "жанры не указаны"
+    blocked = names & GENRES_BLOCK
+    if blocked:
+        return False, "жанр не для канала: " + ", ".join(sorted(blocked))
+    if names & GENRES_ALLOW:
+        return True, ""
+    if "триллер" in names and names & THRILLER_PARTNERS:
+        return True, ""
+    return False, "нет подходящего жанра (" + ", ".join(sorted(names)) + ")"
 
 
 # ---------------- API ----------------
@@ -135,11 +186,13 @@ def _is_russian(item):
     return bool(names & RU_COUNTRIES)
 
 
-def pick_candidate(kind, origin=None):
+def pick_candidate(kind, origin=None, skip=None):
     """Возвращает kinopoiskId непоказанного тайтла.
 
     kind:   'film' или 'series';
-    origin: 'ru' (российские), 'foreign' (зарубежные) или None (любые).
+    origin: 'ru' (российские), 'foreign' (зарубежные) или None (любые);
+    skip:   множество kinopoiskId, которые нужно пропустить (например,
+            отсеянные проверкой жанров по подробным данным).
 
     Порядок: ступени TIERS сверху вниз (новинки -> ... -> вся база); внутри
     ступени — по убыванию популярности; берётся ПЕРВЫЙ непоказанный тайтл.
@@ -153,6 +206,7 @@ def pick_candidate(kind, origin=None):
 
     country_id = _country_id("Россия") if origin == "ru" else None
     this_year = dt.date.today().year
+    rejected = 0
 
     for tier in TIERS:
         for page in range(1, MAX_PAGES + 1):
@@ -174,8 +228,21 @@ def pick_candidate(kind, origin=None):
                     for i in items:
                         if i["kinopoiskId"] in used:
                             continue
+                        if skip and i["kinopoiskId"] in skip:
+                            continue
                         if not (i.get("nameRu") and i.get("posterUrl")):
                             continue
+                        # Фильтр для женской аудитории по жанрам из списка. Если
+                        # API не вернул жанры в списке — проверка будет позже,
+                        # по подробным данным (см. _pick_suitable).
+                        item_genres = _item_genres(i)
+                        if item_genres:
+                            suitable, reason = is_suitable_genres(item_genres)
+                            if not suitable:
+                                rejected += 1
+                                if rejected <= 15:
+                                    print(f"Кино: отсеян «{i.get('nameRu')}» ({i.get('year')}) — {reason}")
+                                continue
                         if origin == "ru" and not _is_russian(i):
                             continue
                         if origin == "foreign" and _is_russian(i):
@@ -327,17 +394,32 @@ def build_topic_hint(f):
     )
 
 
+def _pick_suitable(kind, origin, attempts=5):
+    """Выбирает тайтл и перепроверяет жанры по ПОДРОБНЫМ данным (жанры в
+    списке могут быть неполными). Если не подошёл — берёт следующий."""
+    skip = set()
+    for _ in range(attempts):
+        film_id = pick_candidate(kind, origin, skip)
+        facts = get_details(film_id)
+        suitable, reason = is_suitable_genres(facts["genres"])
+        if suitable:
+            return film_id, facts
+        print(f"Кино: по подробным данным отсеян «{facts['name']}» ({facts['year']}) — {reason}")
+        skip.add(film_id)
+    raise RuntimeError("Не нашлось тайтла с подходящими жанрами за несколько попыток")
+
+
 def prepare_kino(target_date):
     """Выбирает непоказанный тайтл и возвращает факты (+ poster, trailer).
     В used_movies.json НЕ записывает — вызовите mark_used() после успешной публикации."""
     kind, origin = _kind_and_origin(target_date)
     try:
-        film_id = pick_candidate(kind, origin)
+        film_id, facts = _pick_suitable(kind, origin)
     except RuntimeError:
         # например, закончились российские — берём любые, лишь бы пост вышел
         print(f"Кино: для {kind}/{origin} ничего не нашлось, беру без учёта происхождения")
-        film_id = pick_candidate(kind, None)
-    facts = get_details(film_id)
+        film_id, facts = _pick_suitable(kind, None)
+    print(f"Кино: выбран «{facts['name']}» ({facts['year']}), жанры: {', '.join(facts['genres'])}")
     facts["trailer"] = get_trailer_url(film_id)
     return facts
 
@@ -379,7 +461,9 @@ if __name__ == "__main__":
     # Проверка: доступные жанры и пробный подбор (ничего не записывается).
     print("Доступные жанры на Кинопоиске:")
     print(", ".join(g["genre"] for g in get_genres()))
-    print("\nВаши GENRES:", GENRES)
+    print("\nВаши GENRES (поиск):", GENRES)
+    print("Не подходят (GENRES_BLOCK):", ", ".join(sorted(GENRES_BLOCK)))
+    print("Подходят (GENRES_ALLOW):", ", ".join(sorted(GENRES_ALLOW)), "+ триллер вместе с драмой/мелодрамой/детективом")
     print("\nПробный подбор (в used_movies.json не пишется):")
     for k in ("film", "series"):
         for o in ("foreign", "ru"):
