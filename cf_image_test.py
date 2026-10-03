@@ -18,12 +18,15 @@
   ONLY        — часть названия промпта, чтобы прогнать только его (например: manikur)
 """
 import base64
+import functools
 import html
 import os
 import sys
 import time
 
 import requests
+
+print = functools.partial(print, flush=True)
 
 ACCOUNT_ID = os.environ["CF_ACCOUNT_ID"].strip()
 API_TOKEN = os.environ["CF_API_TOKEN"].strip()
@@ -64,7 +67,13 @@ def generate(prompt: str):
 
     last_error = None
     for attempt in (1, 2):
-        resp = requests.post(url, headers=headers, json=body, timeout=180)
+        try:
+            resp = requests.post(url, headers=headers, json=body, timeout=(15, 60))
+        except requests.exceptions.RequestException as e:
+            last_error = f"сеть/таймаут: {e}"
+            print(f"    попытка {attempt}: {last_error}")
+            time.sleep(3)
+            continue
         if resp.status_code == 200:
             ctype = resp.headers.get("content-type", "")
             if ctype.startswith("image/"):
@@ -96,6 +105,7 @@ def main():
 
     gallery = []
     ok = failed = 0
+    streak = 0
     total_time = 0.0
 
     for name, prompt in items:
@@ -106,8 +116,13 @@ def main():
                 data = generate(prompt)
             except Exception as e:
                 failed += 1
+                streak += 1
                 print(f"  вариант {i}: ОШИБКА — {e}")
+                if streak >= 3:
+                    print("ОСТАНОВКА: 3 ошибки подряд, дальше нет смысла. Проверьте токен/Account ID/права Workers AI.")
+                    sys.exit(1)
                 continue
+            streak = 0
             elapsed = time.time() - started
             total_time += elapsed
             ok += 1
