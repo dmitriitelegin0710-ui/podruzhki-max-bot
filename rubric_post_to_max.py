@@ -184,6 +184,7 @@ AI_IMAGE_RUBRICS = {
     "psy_otnosheniya",
     "ezoterika",
     "mama_rebenok",
+    "narodnaya_mudrost",
     "semeinye_istorii",
     "test_dnya",
 }
@@ -1045,6 +1046,12 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None,
             print("Картинка по тексту поста: MAX не вернул token, пробую свою базу и Pexels")
         except Exception as e:
             print(f"Картинка по тексту поста: не получилось ({e}), пробую свою базу и Pexels")
+    elif AI_IMAGES_ENABLED and post_text and rubric["key"] in AI_IMAGE_RUBRICS:
+        print(
+            "Картинка по тексту поста: ПРОПУЩЕНО — Cloudflare не подключён. Добавьте секреты "
+            "CF_ACCOUNT_ID и CF_API_TOKEN в блок env шага запуска в rubric_post.yml. "
+            "Пока берётся своя база фото / Pexels."
+        )
 
     # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
     try:
