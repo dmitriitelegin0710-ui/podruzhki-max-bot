@@ -137,6 +137,7 @@ import manikur_bank
 import kino_source
 import beauty_source
 import fashion_source
+import cf_image
 
 # ---- НАСТРОЙКИ ----
 BOT_TOKEN = os.environ["MAX_BOT_TOKEN"]
@@ -168,6 +169,24 @@ YANDEXGPT_URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion
 YANDEXGPT_MODEL_URI_TEMPLATE = "gpt://{folder_id}/yandexgpt-lite/rc"
 DEFAULT_BUTTON_TEXT = "Читать на сайте"
 SOURCE_BUTTON_TEXT = "Читать источник"
+
+# Картинка, сгенерированная нейросетью по тексту поста (см. cf_image.py).
+# Генерация включена ТОЛЬКО для рубрик из этого списка; у всех остальных
+# остаётся прежняя схема (своя база фото -> Pexels, фото из статьи,
+# постер Кинопоиска, видео и т.д.). Чтобы включить/выключить рубрику —
+# добавьте или уберите её ключ из rubrics.json в множестве ниже.
+# Отключить генерацию целиком без правок кода: AI_IMAGES=0 в env воркфлоу.
+AI_IMAGES_ENABLED = os.environ.get("AI_IMAGES", "1") != "0"
+AI_IMAGE_RUBRICS = {
+    "goroskop",
+    "recept",
+    "zozh",
+    "psy_otnosheniya",
+    "ezoterika",
+    "mama_rebenok",
+    "semeinye_istorii",
+    "test_dnya",
+}
 
 # Максимальная длина поста из реальной статьи (stil/krasota). Лимит текста
 # сообщения в MAX около 4000 символов; берём с запасом. Если MAX всё равно
@@ -859,6 +878,11 @@ def get_video_keywords(rubric: dict, season: str):
 
 
 def upload_media_and_get_token(media_url: str, media_type: str = "image"):
+    media_bytes = requests.get(media_url, timeout=180).content
+    return upload_media_bytes_and_get_token(media_bytes, media_type)
+
+
+def upload_media_bytes_and_get_token(media_bytes: bytes, media_type: str = "image"):
     meta_resp = requests.post(
         f"{API_BASE}/uploads",
         params={"type": media_type},
@@ -870,13 +894,16 @@ def upload_media_and_get_token(media_url: str, media_type: str = "image"):
     upload_url = meta["url"]
     token = meta.get("token")
 
-    media_bytes = requests.get(media_url, timeout=180).content
     if media_type == "video":
         filename = "video.mp4"
         content_type = "video/mp4"
     else:
-        filename = "image.jpg"
-        content_type = "image/jpeg"
+        if media_bytes[:4] == b"\x89PNG":
+            filename = "image.png"
+            content_type = "image/png"
+        else:
+            filename = "image.jpg"
+            content_type = "image/jpeg"
     # ВАЖНО: раньше Content-Type части формы не указывался явно (requests
     # сам решал, что подставить) — для фото это работало, но видео-загрузка
     # на окcdn.ru (инфраструктура MAX для видео) вернула 400 без явного
@@ -928,7 +955,7 @@ def get_photo_keywords(rubric: dict, weekday_index: int):
     return rubric.get("photo_keywords", [])
 
 
-def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None, target_date=None):
+def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None, target_date=None, post_text: str = None):
     """Готовит медиа-вложение для поста в MAX.
     Возвращает кортеж (attachment, media_url, media_type) — media_url и
     media_type ("image" или "video") нужны, чтобы то же самое медиа можно
@@ -995,6 +1022,29 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None,
         print("Маникюр: видео успешно загружено в MAX, token получен")
         attachment = {"type": "video", "payload": {"token": token}}
         return attachment, url, "video"
+
+    # 0) Картинка, сгенерированная нейросетью по тексту поста: описание
+    # берётся из главной темы самого поста (cf_image.build_image_prompt).
+    # Если что-то пошло не так — молча идём дальше к своей базе и Pexels.
+    # media_url/тип для Telegram здесь None: у сгенерированной картинки нет
+    # публичной ссылки, поэтому в Telegram уйдёт только текст.
+    if (
+        AI_IMAGES_ENABLED
+        and post_text
+        and cf_image.is_configured()
+        and rubric["key"] in AI_IMAGE_RUBRICS
+    ):
+        try:
+            prompt = cf_image.build_image_prompt(post_text, get_photo_keywords(rubric, weekday_index))
+            print(f"Картинка по тексту поста: промпт: {prompt}")
+            image_bytes = cf_image.generate_image_bytes(prompt)
+            token = upload_media_bytes_and_get_token(image_bytes, media_type="image")
+            if token:
+                print(f"Картинка по тексту поста: сгенерирована ({len(image_bytes) // 1024} КБ) и загружена в MAX")
+                return {"type": "image", "payload": {"token": token}}, None, None
+            print("Картинка по тексту поста: MAX не вернул token, пробую свою базу и Pexels")
+        except Exception as e:
+            print(f"Картинка по тексту поста: не получилось ({e}), пробую свою базу и Pexels")
 
     # 1) Своя база фото — самый точный вариант, если для рубрики заполнена.
     try:
@@ -1171,7 +1221,7 @@ def main():
                     print(f"{rubric['key']}: фото статьи не загрузилось ({e}), беру фото из Pexels")
             if media_attachment is None:
                 media_attachment, media_url, media_type = fetch_and_upload_media(
-                    rubric, weekday_index, season, now.date()
+                    rubric, weekday_index, season, now.date(), post_text=text
                 )
             if media_attachment:
                 attachments.append(media_attachment)
@@ -1252,7 +1302,7 @@ def main():
                     )
                     telegram_text = telegram_common.adapt_text_for_telegram_local(text, hashtags)
                     tg_kwargs = {}
-                    if media_type == "image":
+                    if media_type == "image" and media_url:
                         tg_kwargs["photo_url"] = media_url
                     tg_response = telegram_common.send_message(telegram_text, **tg_kwargs)
                     if tg_response.status_code == 200:
