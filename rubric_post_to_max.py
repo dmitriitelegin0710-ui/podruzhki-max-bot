@@ -1027,8 +1027,7 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None,
     # 0) Картинка, сгенерированная нейросетью по тексту поста: описание
     # берётся из главной темы самого поста (cf_image.build_image_prompt).
     # Если что-то пошло не так — молча идём дальше к своей базе и Pexels.
-    # media_url/тип для Telegram здесь None: у сгенерированной картинки нет
-    # публичной ссылки, поэтому в Telegram уйдёт только текст.
+    # Вместо media_url возвращаются байты картинки (bytes) — для Telegram.
     if (
         AI_IMAGES_ENABLED
         and post_text
@@ -1042,7 +1041,9 @@ def fetch_and_upload_media(rubric: dict, weekday_index: int, season: str = None,
             token = upload_media_bytes_and_get_token(image_bytes, media_type="image")
             if token:
                 print(f"Картинка по тексту поста: сгенерирована ({len(image_bytes) // 1024} КБ) и загружена в MAX")
-                return {"type": "image", "payload": {"token": token}}, None, None
+                # Вместо ссылки возвращаем сами байты: у сгенерированной картинки
+                # нет публичного URL, а telegram_common умеет принять байты.
+                return {"type": "image", "payload": {"token": token}}, image_bytes, "image"
             print("Картинка по тексту поста: MAX не вернул token, пробую свою базу и Pexels")
         except Exception as e:
             print(f"Картинка по тексту поста: не получилось ({e}), пробую свою базу и Pexels")
@@ -1310,7 +1311,10 @@ def main():
                     telegram_text = telegram_common.adapt_text_for_telegram_local(text, hashtags)
                     tg_kwargs = {}
                     if media_type == "image" and media_url:
-                        tg_kwargs["photo_url"] = media_url
+                        if isinstance(media_url, (bytes, bytearray)):
+                            tg_kwargs["photo_bytes"] = bytes(media_url)
+                        else:
+                            tg_kwargs["photo_url"] = media_url
                     tg_response = telegram_common.send_message(telegram_text, **tg_kwargs)
                     if tg_response.status_code == 200:
                         print(f"Рубрика {rubric['key']}: опубликовано и в Telegram (хэштеги: {hashtags})")
