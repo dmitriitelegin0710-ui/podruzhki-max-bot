@@ -25,6 +25,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Забрать код репозитория
         uses: actions/checkout@v4
@@ -35,7 +36,7 @@ jobs:
       - name: Установить зависимости
         run: pip install requests
       - name: Сгенерировать тестовые картинки
-        run: python cf_image_test.py
+        run: python -u cf_image_test.py
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
