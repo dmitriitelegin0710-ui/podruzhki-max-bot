@@ -6,22 +6,22 @@ rubric_post_to_max.py.
 Публикация в Telegram опциональна: если переменные окружения не заданы,
 is_configured() возвращает False.
 
-Фото/видео отправляются файлом (multipart), а не ссылкой — иначе Telegram
-Bot API сам пытается скачать медиа со своих серверов и часто падает на
-источниках без привычного User-Agent (lenta.ru, Pexels и т.п.).
+Медиа отправляется ФАЙЛОМ (multipart), а не ссылкой — иначе Telegram Bot API
+сам пытается скачать его со своих серверов и часто падает на источниках без
+привычного User-Agent (lenta.ru, Pexels и т.п.). Три способа передать медиа:
+  photo_url   — ссылка: файл скачивается здесь и отправляется в Telegram
+                (фото из своей базы, Pexels, фото из статьи, постер);
+  photo_bytes — готовые байты картинки: используется для картинок,
+                сгенерированных нейросетью (cf_image.py), у которых нет
+                публичной ссылки;
+  video_url   — ссылка на видео (отправляется как sendVideo).
 
---- НОВОЕ: лёгкая офлайн-адаптация текста под Telegram, БЕЗ вызовов GPT ---
-Чтобы посты в MAX и Telegram не были абсолютно идентичны, но при этом не
-тратить токены YandexGPT на вторую генерацию, здесь есть два простых
-инструмента чисто на regex/поиске подстрок:
-  generate_hashtags()          — подбирает 2-3 хэштега по ключевым словам,
-                                  которые реально встретились в готовом
-                                  тексте поста (без обращения к ИИ);
-  adapt_text_for_telegram_local() — добавляет эти хэштеги в конец уже
-                                  готового MAX-текста.
-Это честная, но простая эвристика: тон и структура текста НЕ меняются,
-меняется только набор хэштегов в конце — этого достаточно, чтобы посты не
-были 1-в-1 одинаковыми на двух площадках, и ничего не стоит по токенам.
+Лёгкая офлайн-адаптация текста под Telegram БЕЗ вызовов GPT:
+  generate_hashtags()             — подбирает хэштеги по ключевым словам,
+                                     реально встретившимся в тексте (для новостей);
+  adapt_text_for_telegram_local() — добавляет хэштеги в конец готового MAX-текста.
+Хэштеги рубрик задаются по ключу рубрики в RUBRIC_HASHTAGS ниже. Тон и
+структура текста не меняются — меняется только набор хэштегов в конце.
 
 Требуемые переменные окружения (GitHub Secrets):
   TELEGRAM_BOT_TOKEN — токен бота, подключённого как автопост в канал
@@ -57,6 +57,19 @@ def format_for_telegram(text: str) -> str:
     return text
 
 
+def _cut_to_limit(html_text: str, limit: int) -> str:
+    """Обрезает текст до лимита Telegram по границе строки, а не посреди
+    слова или HTML-тега (обрезанный тег вроде «<b» вызывает ошибку 400 и
+    пост не выходит)."""
+    if len(html_text) <= limit:
+        return html_text
+    cut = html_text[:limit]
+    boundary = cut.rfind("\n")
+    if boundary > limit // 2:
+        cut = cut[:boundary]
+    return cut.rstrip()
+
+
 # --- Подбор хэштегов без ИИ ---
 
 def _normalize_for_keywords(text: str) -> str:
@@ -69,7 +82,8 @@ def _normalize_for_keywords(text: str) -> str:
 
 # Ключевое слово (подстрока, ищется без учёта регистра/ё) → хэштег.
 # Порядок = приоритет при нескольких совпадениях. Список ориентирован на
-# новости шоу-бизнеса — расширяйте под свои темы при необходимости.
+# новости шоу-бизнеса (его использует новостной скрипт) — расширяйте под
+# свои темы при необходимости.
 NEWS_HASHTAG_KEYWORDS = [
     ("скандал", "#скандал"),
     ("сплетн", "#сплетни"),
@@ -96,10 +110,23 @@ DEFAULT_NEWS_HASHTAGS = ["#шоубиз", "#звезды"]
 # этом словаре нет — используется DEFAULT_RUBRIC_HASHTAGS. Дополняйте по
 # мере появления новых рубрик.
 RUBRIC_HASHTAGS = {
-    "test_dnya": ["#тестдня", "#психология"],
-    "istoriya_zhenshiny": ["#сильныеженщины", "#вдохновение"],
+    "utro_privet": ["#доброеутро", "#утро"],
+    "goroskop": ["#гороскоп", "#астрология"],
+    "recept": ["#рецепты", "#готовимдома"],
+    "zozh": ["#здоровье", "#зож"],
+    "manikur": ["#маникюр", "#красота"],
+    "psy_otnosheniya": ["#психология", "#отношения"],
+    "kino_serial": ["#кино", "#чтопосмотреть"],
     "ezoterika": ["#эзотерика", "#таро"],
-    "utro_privet": ["#доброеутро"],
+    "mama_rebenok": ["#мамаиребенок", "#воспитание"],
+    "finansy": ["#финансы", "#деньги"],
+    "stil": ["#стиль", "#мода"],
+    "krasota": ["#красота", "#уход"],
+    "istoriya_zhenshiny": ["#сильныеженщины", "#вдохновение"],
+    "narodnaya_mudrost": ["#народнаямудрость", "#приметы"],
+    "test_dnya": ["#тестдня", "#психология"],
+    "semeinye_istorii": ["#историиизжизни", "#семья"],
+    "vecherniy_ritual": ["#вечернийритуал", "#релакс"],
 }
 DEFAULT_RUBRIC_HASHTAGS = ["#подружки"]
 
@@ -123,9 +150,7 @@ def adapt_text_for_telegram_local(max_text: str, hashtags: list) -> str:
     """Лёгкая офлайн-адаптация уже готового MAX-поста под Telegram — БЕЗ
     повторного обращения к YandexGPT. Добавляет хэштеги в конце поста
     (обычная телеграм-практика, которую в MAX-версии намеренно не
-    используем). Тон, факты и структура абзацев НЕ меняются — это не
-    полноценная адаптация, а дешёвый способ хоть немного отличать площадки
-    без второго вызова GPT."""
+    используем). Тон, факты и структура абзацев НЕ меняются."""
     text = max_text.rstrip()
     if hashtags:
         text += "\n\n" + " ".join(hashtags)
@@ -144,34 +169,58 @@ def _download_bytes(url: str):
         return None
 
 
-def send_message(text: str, photo_url: str = None, video_url: str = None) -> requests.Response:
+def _image_filename(data: bytes) -> str:
+    """Имя файла по содержимому: нейросеть может вернуть PNG, остальные
+    источники — JPEG/WebP."""
+    if data[:4] == b"\x89PNG":
+        return "image.png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image.webp"
+    return "image.jpg"
+
+
+def send_message(
+    text: str,
+    photo_url: str = None,
+    video_url: str = None,
+    photo_bytes: bytes = None,
+) -> requests.Response:
+    """Отправляет пост. Медиа — одно из: photo_bytes (готовая картинка, например
+    сгенерированная), photo_url, video_url. Если медиа не удалось получить,
+    уходит просто текст."""
     if not is_configured():
         raise RuntimeError("Telegram не настроен: нет TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID")
 
     html_text = format_for_telegram(text)
 
-    media_url = photo_url or video_url
-    is_video = bool(video_url) and not photo_url
-    media_bytes = _download_bytes(media_url) if media_url else None
+    is_video = bool(video_url) and not photo_url and not photo_bytes
+    media_bytes = photo_bytes
+    if not media_bytes:
+        media_url = photo_url or video_url
+        media_bytes = _download_bytes(media_url) if media_url else None
 
     if media_bytes:
         endpoint = "sendVideo" if is_video else "sendPhoto"
         field_name = "video" if is_video else "photo"
-        filename = "video.mp4" if is_video else "image.jpg"
+        filename = "video.mp4" if is_video else _image_filename(media_bytes)
         files = {field_name: (filename, media_bytes)}
 
         if len(html_text) > TELEGRAM_CAPTION_LIMIT:
-            requests.post(
+            # Подпись к медиа ограничена 1024 символами: длинный пост
+            # отправляется как картинка, а затем отдельным сообщением — текст.
+            media_resp = requests.post(
                 f"{API_BASE}/{endpoint}",
                 data={"chat_id": CHAT_ID},
                 files=files,
                 timeout=120,
             )
+            if media_resp.status_code != 200:
+                print(f"Telegram: медиа не отправилось — {media_resp.status_code} {media_resp.text[:200]}")
             return requests.post(
                 f"{API_BASE}/sendMessage",
                 json={
                     "chat_id": CHAT_ID,
-                    "text": html_text[:TELEGRAM_MESSAGE_LIMIT],
+                    "text": _cut_to_limit(html_text, TELEGRAM_MESSAGE_LIMIT),
                     "parse_mode": "HTML",
                 },
                 timeout=30,
@@ -192,7 +241,7 @@ def send_message(text: str, photo_url: str = None, video_url: str = None) -> req
         f"{API_BASE}/sendMessage",
         json={
             "chat_id": CHAT_ID,
-            "text": html_text[:TELEGRAM_MESSAGE_LIMIT],
+            "text": _cut_to_limit(html_text, TELEGRAM_MESSAGE_LIMIT),
             "parse_mode": "HTML",
         },
         timeout=30,
